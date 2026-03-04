@@ -7,22 +7,22 @@
 - FastAPI (Python)
 - SQLite
 - JWT 认证
+- uv (工程化管理)
 
 ## 开发
 
 ```bash
-# 创建虚拟环境
-python -m venv venv
-source venv/bin/activate
+# 安装 uv (如果未安装)
+# curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 安装依赖
-pip install -r requirements.txt
+# 安装依赖并创建虚拟环境
+uv sync
 
 # 启动开发服务器
-uvicorn src.main:app --reload
+uv run uvicorn src.main:app --reload
 
 # 或者
-fastapi dev src/main.py
+uv run fastapi dev src/main.py
 ```
 
 ## API 文档

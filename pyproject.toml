@@ -1,0 +1,19 @@
+[project]
+name = "keeper"
+version = "1.0.0"
+description = "密码管理器后端 API"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "cryptography>=43.0.0",
+    "aiosqlite>=0.20.0",
+    "pydantic>=2.10.0",
+    "python-multipart>=0.0.12",
+]
+
+[tool.uv]
+dev-dependencies = []
