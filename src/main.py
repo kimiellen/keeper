@@ -4,7 +4,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.auth import router as auth_router
+from src.api.bookmarks import router as bookmarks_router
+from src.api.relations import router as relations_router
 from src.api.session import SessionManager
+from src.api.stats import router as stats_router
+from src.api.tags import router as tags_router
 from src.db.engine import create_engine, create_session_factory
 from src.db.models import Base
 from src.middleware.auth import AuthMiddleware
@@ -34,6 +38,10 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(tags_router)
+app.include_router(relations_router)
+app.include_router(bookmarks_router)
+app.include_router(stats_router)
 
 
 @app.get("/")
