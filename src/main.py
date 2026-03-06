@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -12,6 +13,7 @@ from src.api.tags import router as tags_router
 from src.db.engine import create_engine, create_session_factory
 from src.db.models import Base
 from src.middleware.auth import AuthMiddleware
+from src.middleware.security import SecurityHeadersMiddleware
 
 
 @asynccontextmanager
@@ -28,14 +30,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Keeper API", version="1.0.0", lifespan=lifespan)
 
-app.add_middleware(AuthMiddleware)
+_raw_origins = os.environ.get("KEEPER_CORS_ORIGINS", "").split(",")
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins if o.strip()]
+
+CORS_ORIGIN_REGEX = os.environ.get("KEEPER_CORS_ORIGIN_REGEX", r"^moz-extension://.*$")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+    max_age=86400,
 )
+app.add_middleware(AuthMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(auth_router)
 app.include_router(tags_router)
@@ -57,4 +67,13 @@ async def health():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8443)
+    ssl_keyfile = os.environ.get("KEEPER_SSL_KEYFILE", "certs/localhost+2-key.pem")
+    ssl_certfile = os.environ.get("KEEPER_SSL_CERTFILE", "certs/localhost+2.pem")
+
+    uvicorn.run(
+        app,
+        host="127.0.0.1",
+        port=8443,
+        ssl_keyfile=ssl_keyfile,
+        ssl_certfile=ssl_certfile,
+    )
