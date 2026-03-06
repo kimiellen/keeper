@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM 模型 — 严格对齐 docs/schema.md。"""
+"""SQLAlchemy ORM 模型 — 严格对齐 docs/api.md 规范。"""
 
 from sqlalchemy import CheckConstraint, Index, Integer, Text, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -9,7 +9,7 @@ class Base(DeclarativeBase):
 
 
 class Tag(Base):
-    """schema.md §1 — 标签管理。"""
+    """标签管理 — 对齐 api.md §标签管理。"""
 
     __tablename__ = "tags"
 
@@ -18,7 +18,9 @@ class Tag(Base):
     color: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'#6B7280'")
     )
+    icon: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
     __table_args__ = (Index("idx_tags_name", "name"),)
 
@@ -27,26 +29,26 @@ class Tag(Base):
 
 
 class Relation(Base):
-    """schema.md §2 — 关联关系（phone/email/social/other）。"""
+    """关联关系管理 — 对齐 api.md §关联管理。"""
 
     __tablename__ = "relations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     type: Mapped[str] = mapped_column(Text, nullable=False)
-    value: Mapped[str] = mapped_column(Text, nullable=False)
-    label: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
     __table_args__ = (
         CheckConstraint(
-            "type IN ('phone', 'email', 'social', 'other')",
+            "type IN ('phone', 'email', 'idcard', 'other')",
             name="ck_relations_type",
         ),
         Index("idx_relations_type", "type"),
     )
 
     def __repr__(self) -> str:
-        return f"<Relation(id={self.id}, type={self.type!r}, value={self.value!r})>"
+        return f"<Relation(id={self.id}, name={self.name!r}, type={self.type!r})>"
 
 
 class Bookmark(Base):

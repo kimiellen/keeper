@@ -26,7 +26,7 @@ async def db_session():
 class TestTagModel:
     @pytest.mark.asyncio
     async def test_create_tag(self, db_session):
-        tag = Tag(name="Work", created_at=NOW)
+        tag = Tag(name="Work", created_at=NOW, updated_at=NOW)
         db_session.add(tag)
         await db_session.commit()
 
@@ -37,45 +37,53 @@ class TestTagModel:
 
     @pytest.mark.asyncio
     async def test_color_default(self, db_session):
-        tag = Tag(name="Default Color", created_at=NOW)
+        tag = Tag(name="Default Color", created_at=NOW, updated_at=NOW)
         db_session.add(tag)
         await db_session.commit()
         await db_session.refresh(tag)
         assert tag.color == "#6B7280"
 
     @pytest.mark.asyncio
+    async def test_icon_default(self, db_session):
+        tag = Tag(name="No Icon", created_at=NOW, updated_at=NOW)
+        db_session.add(tag)
+        await db_session.commit()
+        await db_session.refresh(tag)
+        assert tag.icon == ""
+
+    @pytest.mark.asyncio
     async def test_custom_color(self, db_session):
-        tag = Tag(name="Custom", color="#FF0000", created_at=NOW)
+        tag = Tag(name="Custom", color="#FF0000", created_at=NOW, updated_at=NOW)
         db_session.add(tag)
         await db_session.commit()
         assert tag.color == "#FF0000"
 
     @pytest.mark.asyncio
     async def test_unique_name_constraint(self, db_session):
-        db_session.add(Tag(name="Duplicate", created_at=NOW))
+        db_session.add(Tag(name="Duplicate", created_at=NOW, updated_at=NOW))
         await db_session.commit()
 
-        db_session.add(Tag(name="Duplicate", created_at=NOW))
+        db_session.add(Tag(name="Duplicate", created_at=NOW, updated_at=NOW))
         with pytest.raises(IntegrityError):
             await db_session.commit()
 
     @pytest.mark.asyncio
     async def test_name_not_null(self, db_session):
-        db_session.add(Tag(name=None, created_at=NOW))
+        db_session.add(Tag(name=None, created_at=NOW, updated_at=NOW))
         with pytest.raises(IntegrityError):
             await db_session.commit()
 
     @pytest.mark.asyncio
     async def test_autoincrement_id(self, db_session):
-        t1 = Tag(name="First", created_at=NOW)
-        t2 = Tag(name="Second", created_at=NOW)
+        t1 = Tag(name="First", created_at=NOW, updated_at=NOW)
+        t2 = Tag(name="Second", created_at=NOW, updated_at=NOW)
         db_session.add_all([t1, t2])
         await db_session.commit()
         assert t2.id == t1.id + 1
 
     @pytest.mark.asyncio
     async def test_repr(self, db_session):
-        tag = Tag(name="Test", created_at=NOW)
+        tag = Tag(name="Test", created_at=NOW, updated_at=NOW)
         db_session.add(tag)
         await db_session.commit()
         assert "Test" in repr(tag)
@@ -84,34 +92,37 @@ class TestTagModel:
 class TestRelationModel:
     @pytest.mark.asyncio
     async def test_create_relation(self, db_session):
-        rel = Relation(type="email", value="test@example.com", created_at=NOW)
+        rel = Relation(
+            name="Personal Email", type="email", created_at=NOW, updated_at=NOW
+        )
         db_session.add(rel)
         await db_session.commit()
 
         result = await db_session.execute(select(Relation))
         fetched = result.scalar_one()
+        assert fetched.name == "Personal Email"
         assert fetched.type == "email"
-        assert fetched.value == "test@example.com"
+        assert fetched.id is not None
 
     @pytest.mark.asyncio
-    async def test_label_default(self, db_session):
-        rel = Relation(type="phone", value="+1234567890", created_at=NOW)
-        db_session.add(rel)
+    async def test_unique_name_constraint(self, db_session):
+        db_session.add(
+            Relation(name="Dup", type="phone", created_at=NOW, updated_at=NOW)
+        )
         await db_session.commit()
-        await db_session.refresh(rel)
-        assert rel.label == ""
 
-    @pytest.mark.asyncio
-    async def test_custom_label(self, db_session):
-        rel = Relation(type="phone", value="+1234567890", label="Main", created_at=NOW)
-        db_session.add(rel)
-        await db_session.commit()
-        assert rel.label == "Main"
+        db_session.add(
+            Relation(name="Dup", type="email", created_at=NOW, updated_at=NOW)
+        )
+        with pytest.raises(IntegrityError):
+            await db_session.commit()
 
     @pytest.mark.asyncio
     async def test_valid_types(self, db_session):
-        for t in ("phone", "email", "social", "other"):
-            db_session.add(Relation(type=t, value=f"val_{t}", created_at=NOW))
+        for i, t in enumerate(("phone", "email", "idcard", "other")):
+            db_session.add(
+                Relation(name=f"rel_{t}", type=t, created_at=NOW, updated_at=NOW)
+            )
         await db_session.commit()
 
         result = await db_session.execute(select(Relation))
@@ -119,18 +130,28 @@ class TestRelationModel:
 
     @pytest.mark.asyncio
     async def test_invalid_type_check_constraint(self, db_session):
-        db_session.add(Relation(type="invalid", value="x", created_at=NOW))
+        db_session.add(
+            Relation(name="bad", type="invalid", created_at=NOW, updated_at=NOW)
+        )
         with pytest.raises(IntegrityError):
             await db_session.commit()
 
     @pytest.mark.asyncio
+    async def test_autoincrement_id(self, db_session):
+        r1 = Relation(name="First", type="phone", created_at=NOW, updated_at=NOW)
+        r2 = Relation(name="Second", type="email", created_at=NOW, updated_at=NOW)
+        db_session.add_all([r1, r2])
+        await db_session.commit()
+        assert r2.id == r1.id + 1
+
+    @pytest.mark.asyncio
     async def test_repr(self, db_session):
-        rel = Relation(type="email", value="a@b.c", created_at=NOW)
+        rel = Relation(name="Work Phone", type="phone", created_at=NOW, updated_at=NOW)
         db_session.add(rel)
         await db_session.commit()
         r = repr(rel)
-        assert "email" in r
-        assert "a@b.c" in r
+        assert "Work Phone" in r
+        assert "phone" in r
 
 
 class TestBookmarkModel:
