@@ -13,6 +13,7 @@ from src.api.tags import router as tags_router
 from src.db.engine import create_engine, create_session_factory
 from src.db.models import Base
 from src.middleware.auth import AuthMiddleware
+from src.middleware.rate_limit import RateLimitMiddleware
 from src.middleware.security import SecurityHeadersMiddleware
 
 
@@ -45,6 +46,7 @@ app.add_middleware(
     max_age=86400,
 )
 app.add_middleware(AuthMiddleware)
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(auth_router)
