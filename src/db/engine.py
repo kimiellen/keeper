@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "keeper.db"
@@ -10,6 +11,16 @@ DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "keeper.db"
 _SQLITE_CONNECT_ARGS = {
     "check_same_thread": False,
 }
+
+
+def _set_sqlite_pragmas(dbapi_conn, connection_record) -> None:  # type: ignore[no-untyped-def]
+    """每次新建 SQLite 连接时设置性能和安全 PRAGMA。"""
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA cache_size=-8000")  # 8 MB
+    cursor.close()
 
 
 def get_database_url(db_path: str | Path | None = None) -> str:
@@ -28,11 +39,13 @@ def get_database_url(db_path: str | Path | None = None) -> str:
 def create_engine(db_path: str | Path | None = None, echo: bool = False):
     """创建 AsyncEngine。echo=True 输出 SQL 日志。"""
     url = get_database_url(db_path)
-    return create_async_engine(
+    engine = create_async_engine(
         url,
         echo=echo,
         connect_args=_SQLITE_CONNECT_ARGS,
     )
+    event.listen(engine.sync_engine, "connect", _set_sqlite_pragmas)
+    return engine
 
 
 def create_session_factory(engine) -> async_sessionmaker[AsyncSession]:
