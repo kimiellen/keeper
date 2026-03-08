@@ -9,6 +9,37 @@ from xpinyin import Pinyin
 
 _pinyin = Pinyin()
 
+
+def _compute_initials(name: str) -> str:
+    """Compute search initials for a bookmark name.
+
+    Chinese characters use pinyin first letter; English segments use
+    CamelCase / word-boundary uppercase letters as initials.
+    Examples: "GitHub" -> "gh", "百度" -> "bd", "GitHub工作" -> "ghgz".
+    """
+    result: list[str] = []
+    i = 0
+    while i < len(name):
+        ch = name[i]
+        if "\u4e00" <= ch <= "\u9fff":
+            result.append(_pinyin.get_initials(ch, "").lower())
+            i += 1
+        elif ch.isascii() and ch.isalpha():
+            j = i
+            while j < len(name) and name[j].isascii() and name[j].isalpha():
+                j += 1
+            segment = name[i:j]
+            uppers = [c for c in segment if c.isupper()]
+            if uppers:
+                result.append("".join(uppers).lower())
+            else:
+                result.append(segment[0].lower())
+            i = j
+        else:
+            i += 1
+    return "".join(result)[:50]
+
+
 from src.api.schemas import (
     AccountCreate,
     AccountResponse,
@@ -19,6 +50,7 @@ from src.api.schemas import (
     BookmarkUpdate,
     BookmarkUseRequest,
     BookmarkUseResponse,
+    SearchHighlight,
     UrlItem,
 )
 from src.db.models import Bookmark, Relation, Tag
@@ -36,7 +68,44 @@ def _safe_json_load_list(value: str) -> list[object]:
     return []
 
 
-def _bookmark_to_response(bm: Bookmark) -> BookmarkResponse:
+def _negate_timestamp(ts: str) -> str:
+    """Invert ISO 8601 timestamp string for descending sort within ascending tuple."""
+    return "".join(chr(0x10FFFF - ord(c)) for c in ts)
+
+
+def _search_rank(bm: Bookmark, search: str) -> int:
+    """Return match priority: 0=exact, 1=prefix, 2=contains. Lower is better."""
+    s = search.lower()
+    name_lower = bm.name.lower()
+    if name_lower == s:
+        return 0
+    if (
+        name_lower.startswith(s)
+        or bm.pinyin_full.startswith(s)
+        or bm.pinyin_initials.startswith(s)
+    ):
+        return 1
+    return 2
+
+
+def _compute_highlights(name: str, search: str) -> list[SearchHighlight]:
+    highlights: list[SearchHighlight] = []
+    lower_name = name.lower()
+    lower_search = search.lower()
+    positions: list[list[int]] = []
+    start = 0
+    while True:
+        idx = lower_name.find(lower_search, start)
+        if idx == -1:
+            break
+        positions.append([idx, len(lower_search)])
+        start = idx + 1
+    if positions:
+        highlights.append(SearchHighlight(field="name", positions=positions))
+    return highlights
+
+
+def _bookmark_to_response(bm: Bookmark, search: str | None = None) -> BookmarkResponse:
     tag_ids = [
         item for item in _safe_json_load_list(bm.tag_ids) if isinstance(item, int)
     ]
@@ -91,6 +160,8 @@ def _bookmark_to_response(bm: Bookmark) -> BookmarkResponse:
             )
         )
 
+    highlights = _compute_highlights(bm.name, search) if search else None
+
     return BookmarkResponse(
         id=bm.id,
         name=bm.name,
@@ -102,6 +173,7 @@ def _bookmark_to_response(bm: Bookmark) -> BookmarkResponse:
         createdAt=bm.created_at,
         updatedAt=bm.updated_at,
         lastUsedAt=bm.last_used_at,
+        highlights=highlights if highlights else None,
     )
 
 
@@ -182,11 +254,13 @@ async def list_bookmarks(
 
     async with session_factory() as session:
         base_filter = []
-        if search:
+        search_lower = search.lower() if search else None
+        if search_lower:
             base_filter.append(
                 or_(
                     Bookmark.name.contains(search),
-                    Bookmark.pinyin_initials.contains(search),
+                    Bookmark.pinyin_initials.contains(search_lower),
+                    Bookmark.pinyin_full.contains(search_lower),
                 )
             )
 
@@ -197,21 +271,34 @@ async def list_bookmarks(
             base_filter.append(or_(*tag_conditions))
 
         count_query = select(func.count()).select_from(Bookmark)
-        data_query = select(Bookmark).order_by(order_col)
-
         for condition in base_filter:
             count_query = count_query.where(condition)
-            data_query = data_query.where(condition)
-
-        data_query = data_query.limit(limit).offset(offset)
 
         total_result = await session.execute(count_query)
         total = total_result.scalar_one()
 
-        result = await session.execute(data_query)
-        bookmarks = result.scalars().all()
+        if search_lower:
+            data_query = select(Bookmark)
+            for condition in base_filter:
+                data_query = data_query.where(condition)
+            result = await session.execute(data_query)
+            all_matches = list(result.scalars().all())
+            all_matches.sort(
+                key=lambda bm: (
+                    _search_rank(bm, search_lower),
+                    _negate_timestamp(bm.last_used_at),
+                ),
+            )
+            bookmarks = all_matches[offset : offset + limit]
+        else:
+            data_query = select(Bookmark).order_by(order_col)
+            for condition in base_filter:
+                data_query = data_query.where(condition)
+            data_query = data_query.limit(limit).offset(offset)
+            result = await session.execute(data_query)
+            bookmarks = list(result.scalars().all())
 
-    data = [_bookmark_to_response(bookmark) for bookmark in bookmarks]
+    data = [_bookmark_to_response(bookmark, search) for bookmark in bookmarks]
 
     response.headers["X-Total-Count"] = str(total)
     if offset + limit < total:
@@ -265,7 +352,7 @@ async def create_bookmark(
     now = datetime.now(timezone.utc).isoformat()
     pinyin_initials = body.pinyinInitials
     if pinyin_initials is None:
-        pinyin_initials = _pinyin.get_initials(body.name, "").lower()[:50]
+        pinyin_initials = _compute_initials(body.name)
 
     tag_ids = body.tagIds or []
     urls = [item.model_dump() for item in (body.urls or [])]
@@ -286,10 +373,13 @@ async def create_bookmark(
                 media_type="application/json",
             )
 
+        pinyin_full = _pinyin.get_pinyin(body.name, "").lower()
+
         bookmark = Bookmark(
             id=str(uuid.uuid4()),
             name=body.name,
             pinyin_initials=pinyin_initials,
+            pinyin_full=pinyin_full,
             tag_ids=json.dumps(tag_ids),
             urls=json.dumps(urls),
             notes=body.notes or "",
@@ -318,7 +408,7 @@ async def update_bookmark(
     now = datetime.now(timezone.utc).isoformat()
     pinyin_initials = body.pinyinInitials
     if pinyin_initials is None:
-        pinyin_initials = _pinyin.get_initials(body.name, "").lower()[:50]
+        pinyin_initials = _compute_initials(body.name)
 
     tag_ids = body.tagIds or []
     urls = [item.model_dump() for item in (body.urls or [])]
@@ -352,6 +442,7 @@ async def update_bookmark(
 
         bookmark.name = body.name
         bookmark.pinyin_initials = pinyin_initials
+        bookmark.pinyin_full = _pinyin.get_pinyin(body.name, "").lower()
         bookmark.tag_ids = json.dumps(tag_ids)
         bookmark.urls = json.dumps(urls)
         bookmark.notes = body.notes or ""
@@ -388,13 +479,12 @@ async def patch_bookmark(
 
         if updates.get("name") is not None:
             bookmark.name = updates["name"]
+            bookmark.pinyin_full = _pinyin.get_pinyin(bookmark.name, "").lower()
 
         if updates.get("pinyinInitials") is not None:
             bookmark.pinyin_initials = updates["pinyinInitials"]
         elif updates.get("name") is not None:
-            bookmark.pinyin_initials = _pinyin.get_initials(bookmark.name, "").lower()[
-                :50
-            ]
+            bookmark.pinyin_initials = _compute_initials(bookmark.name)
 
         if updates.get("tagIds") is not None:
             tag_ids = updates["tagIds"]

@@ -139,6 +139,11 @@ class BookmarkPatch(BaseModel):
     accounts: list[AccountCreate] | None = None
 
 
+class SearchHighlight(BaseModel):
+    field: str
+    positions: list[list[int]]
+
+
 class BookmarkResponse(BaseModel):
     id: str
     name: str
@@ -150,6 +155,7 @@ class BookmarkResponse(BaseModel):
     createdAt: str
     updatedAt: str
     lastUsedAt: str
+    highlights: list[SearchHighlight] | None = None
 
 
 class BookmarkListResponse(BaseModel):
