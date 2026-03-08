@@ -1,7 +1,7 @@
 import json
 
 from fastapi import APIRouter, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.api.schemas import RecentBookmark, StatsResponse, TagCount
 from src.db.models import Bookmark, Relation, Tag
@@ -14,47 +14,62 @@ async def get_stats(request: Request) -> StatsResponse:
     session_factory = request.app.state.session_factory
 
     async with session_factory() as session:
-        tags_result = await session.execute(select(Tag))
-        tags = tags_result.scalars().all()
+        total_bookmarks_r = await session.execute(
+            select(func.count()).select_from(Bookmark)
+        )
+        total_bookmarks: int = total_bookmarks_r.scalar_one()
 
-        relations_result = await session.execute(select(Relation))
-        relations = relations_result.scalars().all()
+        total_tags_r = await session.execute(select(func.count()).select_from(Tag))
+        total_tags: int = total_tags_r.scalar_one()
 
-        bookmarks_result = await session.execute(select(Bookmark))
-        bookmarks = bookmarks_result.scalars().all()
+        total_relations_r = await session.execute(
+            select(func.count()).select_from(Relation)
+        )
+        total_relations: int = total_relations_r.scalar_one()
+
+        accounts_r = await session.execute(select(Bookmark.accounts))
+        accounts_col = accounts_r.scalars().all()
+
+        tags_r = await session.execute(select(Tag.id, Tag.name))
+        tags = tags_r.all()
+
+        recent_r = await session.execute(
+            select(Bookmark.id, Bookmark.name, Bookmark.last_used_at)
+            .order_by(Bookmark.last_used_at.desc())
+            .limit(10)
+        )
+        recent_rows = recent_r.all()
+
+        tag_usage: list[TagCount] = []
+        for tag_id, tag_name in tags:
+            count_r = await session.execute(
+                select(func.count())
+                .select_from(Bookmark)
+                .where(Bookmark.tag_ids.contains(str(tag_id)))
+            )
+            tag_usage.append(
+                TagCount(id=tag_id, name=tag_name, count=count_r.scalar_one())
+            )
 
     total_accounts = 0
-    for bookmark in bookmarks:
+    for raw in accounts_col:
         try:
-            accounts = json.loads(bookmark.accounts)
+            parsed = json.loads(raw)
         except (TypeError, ValueError):
-            accounts = []
-        if isinstance(accounts, list):
-            total_accounts += len(accounts)
-
-    tag_usage: list[TagCount] = []
-    for tag in tags:
-        count = 0
-        for bookmark in bookmarks:
-            try:
-                tag_ids = json.loads(bookmark.tag_ids)
-            except (TypeError, ValueError):
-                tag_ids = []
-            if isinstance(tag_ids, list) and tag.id in tag_ids:
-                count += 1
-        tag_usage.append(TagCount(id=tag.id, name=tag.name, count=count))
+            continue
+        if isinstance(parsed, list):
+            total_accounts += len(parsed)
 
     most_used_tags = sorted(tag_usage, key=lambda item: item.count, reverse=True)[:10]
 
     recently_used = [
-        RecentBookmark(id=bookmark.id, name=bookmark.name, lastUsedAt=bookmark.last_used_at)
-        for bookmark in sorted(bookmarks, key=lambda item: item.last_used_at, reverse=True)[:10]
+        RecentBookmark(id=row[0], name=row[1], lastUsedAt=row[2]) for row in recent_rows
     ]
 
     return StatsResponse(
-        totalBookmarks=len(bookmarks),
-        totalTags=len(tags),
-        totalRelations=len(relations),
+        totalBookmarks=total_bookmarks,
+        totalTags=total_tags,
+        totalRelations=total_relations,
         totalAccounts=total_accounts,
         mostUsedTags=most_used_tags,
         recentlyUsed=recently_used,

@@ -4,8 +4,10 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Query, Request, Response
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from xpinyin import Pinyin
+
+_pinyin = Pinyin()
 
 from src.api.schemas import (
     AccountCreate,
@@ -35,7 +37,9 @@ def _safe_json_load_list(value: str) -> list[object]:
 
 
 def _bookmark_to_response(bm: Bookmark) -> BookmarkResponse:
-    tag_ids = [item for item in _safe_json_load_list(bm.tag_ids) if isinstance(item, int)]
+    tag_ids = [
+        item for item in _safe_json_load_list(bm.tag_ids) if isinstance(item, int)
+    ]
 
     urls_raw = _safe_json_load_list(bm.urls)
     urls: list[UrlItem] = []
@@ -46,7 +50,9 @@ def _bookmark_to_response(bm: Bookmark) -> BookmarkResponse:
         if not isinstance(url, str):
             continue
         last_used = item.get("lastUsed")
-        urls.append(UrlItem(url=url, lastUsed=last_used if isinstance(last_used, str) else None))
+        urls.append(
+            UrlItem(url=url, lastUsed=last_used if isinstance(last_used, str) else None)
+        )
 
     accounts_raw = _safe_json_load_list(bm.accounts)
     accounts: list[AccountResponse] = []
@@ -115,7 +121,9 @@ async def _validate_related_ids(session, accounts: list[AccountCreate]) -> bool:
     if not related_ids:
         return True
 
-    result = await session.execute(select(Relation.id).where(Relation.id.in_(set(related_ids))))
+    result = await session.execute(
+        select(Relation.id).where(Relation.id.in_(set(related_ids)))
+    )
     existing_ids = {item for item in result.scalars().all()}
     return all(related_id in existing_ids for related_id in related_ids)
 
@@ -173,31 +181,37 @@ async def list_bookmarks(
             )
 
     async with session_factory() as session:
-        query = select(Bookmark).order_by(order_col)
+        base_filter = []
         if search:
-            query = query.where(
+            base_filter.append(
                 or_(
                     Bookmark.name.contains(search),
                     Bookmark.pinyin_initials.contains(search),
                 )
             )
 
-        result = await session.execute(query)
+        if filter_tag_ids:
+            tag_conditions = []
+            for tid in filter_tag_ids:
+                tag_conditions.append(Bookmark.tag_ids.contains(str(tid)))
+            base_filter.append(or_(*tag_conditions))
+
+        count_query = select(func.count()).select_from(Bookmark)
+        data_query = select(Bookmark).order_by(order_col)
+
+        for condition in base_filter:
+            count_query = count_query.where(condition)
+            data_query = data_query.where(condition)
+
+        data_query = data_query.limit(limit).offset(offset)
+
+        total_result = await session.execute(count_query)
+        total = total_result.scalar_one()
+
+        result = await session.execute(data_query)
         bookmarks = result.scalars().all()
 
-    if filter_tag_ids:
-        filtered: list[Bookmark] = []
-        filter_set = set(filter_tag_ids)
-        for bookmark in bookmarks:
-            tag_ids = _safe_json_load_list(bookmark.tag_ids)
-            normalized_tag_ids = {item for item in tag_ids if isinstance(item, int)}
-            if normalized_tag_ids.intersection(filter_set):
-                filtered.append(bookmark)
-        bookmarks = filtered
-
-    total = len(bookmarks)
-    paginated = bookmarks[offset : offset + limit]
-    data = [_bookmark_to_response(bookmark) for bookmark in paginated]
+    data = [_bookmark_to_response(bookmark) for bookmark in bookmarks]
 
     response.headers["X-Total-Count"] = str(total)
     if offset + limit < total:
@@ -211,17 +225,23 @@ async def list_bookmarks(
             next_params["tagIds"] = tagIds
         if search:
             next_params["search"] = search
-        response.headers["Link"] = f'</api/bookmarks?{urlencode(next_params)}>; rel="next"'
+        response.headers["Link"] = (
+            f'</api/bookmarks?{urlencode(next_params)}>; rel="next"'
+        )
 
     return BookmarkListResponse(data=data, total=total, limit=limit, offset=offset)
 
 
 @router.get("/{bookmark_id}", response_model=None)
-async def get_bookmark(bookmark_id: str, request: Request) -> BookmarkResponse | Response:
+async def get_bookmark(
+    bookmark_id: str, request: Request
+) -> BookmarkResponse | Response:
     session_factory = request.app.state.session_factory
 
     async with session_factory() as session:
-        result = await session.execute(select(Bookmark).where(Bookmark.id == bookmark_id))
+        result = await session.execute(
+            select(Bookmark).where(Bookmark.id == bookmark_id)
+        )
         bookmark = result.scalar_one_or_none()
 
     if bookmark is None:
@@ -245,7 +265,7 @@ async def create_bookmark(
     now = datetime.now(timezone.utc).isoformat()
     pinyin_initials = body.pinyinInitials
     if pinyin_initials is None:
-        pinyin_initials = Pinyin().get_initials(body.name, "").lower()[:50]
+        pinyin_initials = _pinyin.get_initials(body.name, "").lower()[:50]
 
     tag_ids = body.tagIds or []
     urls = [item.model_dump() for item in (body.urls or [])]
@@ -298,14 +318,16 @@ async def update_bookmark(
     now = datetime.now(timezone.utc).isoformat()
     pinyin_initials = body.pinyinInitials
     if pinyin_initials is None:
-        pinyin_initials = Pinyin().get_initials(body.name, "").lower()[:50]
+        pinyin_initials = _pinyin.get_initials(body.name, "").lower()[:50]
 
     tag_ids = body.tagIds or []
     urls = [item.model_dump() for item in (body.urls or [])]
     accounts = body.accounts or []
 
     async with session_factory() as session:
-        result = await session.execute(select(Bookmark).where(Bookmark.id == bookmark_id))
+        result = await session.execute(
+            select(Bookmark).where(Bookmark.id == bookmark_id)
+        )
         bookmark = result.scalar_one_or_none()
         if bookmark is None:
             return Response(
@@ -351,7 +373,9 @@ async def patch_bookmark(
     session_factory = request.app.state.session_factory
 
     async with session_factory() as session:
-        result = await session.execute(select(Bookmark).where(Bookmark.id == bookmark_id))
+        result = await session.execute(
+            select(Bookmark).where(Bookmark.id == bookmark_id)
+        )
         bookmark = result.scalar_one_or_none()
         if bookmark is None:
             return Response(
@@ -368,7 +392,9 @@ async def patch_bookmark(
         if updates.get("pinyinInitials") is not None:
             bookmark.pinyin_initials = updates["pinyinInitials"]
         elif updates.get("name") is not None:
-            bookmark.pinyin_initials = Pinyin().get_initials(bookmark.name, "").lower()[:50]
+            bookmark.pinyin_initials = _pinyin.get_initials(bookmark.name, "").lower()[
+                :50
+            ]
 
         if updates.get("tagIds") is not None:
             tag_ids = updates["tagIds"]
@@ -411,7 +437,9 @@ async def delete_bookmark(bookmark_id: str, request: Request) -> Response:
     session_factory = request.app.state.session_factory
 
     async with session_factory() as session:
-        result = await session.execute(select(Bookmark).where(Bookmark.id == bookmark_id))
+        result = await session.execute(
+            select(Bookmark).where(Bookmark.id == bookmark_id)
+        )
         bookmark = result.scalar_one_or_none()
         if bookmark is None:
             return Response(
@@ -435,7 +463,9 @@ async def use_bookmark(
     session_factory = request.app.state.session_factory
 
     async with session_factory() as session:
-        result = await session.execute(select(Bookmark).where(Bookmark.id == bookmark_id))
+        result = await session.execute(
+            select(Bookmark).where(Bookmark.id == bookmark_id)
+        )
         bookmark = result.scalar_one_or_none()
         if bookmark is None:
             return Response(
