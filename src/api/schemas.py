@@ -194,3 +194,46 @@ class StatsResponse(BaseModel):
     totalAccounts: int
     mostUsedTags: list[TagCount]
     recentlyUsed: list[RecentBookmark]
+
+
+class ImportPreviewRequest(BaseModel):
+    format: Literal["keeper_json", "bitwarden_json", "csv"]
+    content: str = Field(min_length=1)
+
+
+class ImportConflict(BaseModel):
+    name: str
+    type: str
+
+
+class ImportPreviewResponse(BaseModel):
+    format: str
+    totalBookmarks: int
+    totalTags: int
+    totalRelations: int
+    conflicts: list[ImportConflict]
+    warnings: list[str]
+
+
+class ImportRequest(BaseModel):
+    format: Literal["keeper_json", "bitwarden_json", "csv"]
+    content: str = Field(min_length=1)
+    conflictPolicy: Literal["skip", "rename", "overwrite"] = "skip"
+
+
+class ImportCounts(BaseModel):
+    bookmarks: int
+    tags: int
+    relations: int
+
+
+class ImportSkipped(BaseModel):
+    bookmarks: int
+    reason: str
+
+
+class ImportResponse(BaseModel):
+    message: str
+    imported: ImportCounts
+    skipped: ImportSkipped
+    warnings: list[str]
