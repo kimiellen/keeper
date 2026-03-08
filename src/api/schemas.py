@@ -237,3 +237,38 @@ class ImportResponse(BaseModel):
     imported: ImportCounts
     skipped: ImportSkipped
     warnings: list[str]
+
+
+# ── 数据库管理 ────────────────────────────────────────────────
+
+
+class DatabaseInfo(BaseModel):
+    path: str
+    name: str
+
+
+class DatabaseListResponse(BaseModel):
+    databases: list[DatabaseInfo]
+    current: str | None = None
+
+
+class DatabaseOpenRequest(BaseModel):
+    path: str = Field(min_length=1)
+
+
+class DatabaseOpenResponse(BaseModel):
+    message: str = "数据库已切换"
+    name: str
+
+
+class DatabaseCreateRequest(BaseModel):
+    path: str = Field(min_length=1)
+    email: str = Field(min_length=1)
+    masterPasswordHash: str = Field(min_length=1)
+    encryptedUserKey: str = Field(min_length=1)
+    kdfParams: KdfParams
+
+
+class DatabaseCreateResponse(BaseModel):
+    message: str = "数据库已创建"
+    name: str
