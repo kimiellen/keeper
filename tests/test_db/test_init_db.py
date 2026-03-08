@@ -70,6 +70,7 @@ class TestInitDatabase:
             "idx_bookmarks_last_used",
             "idx_bookmarks_name",
             "idx_bookmarks_pinyin",
+            "idx_bookmarks_pinyin_full",
             "idx_relations_type",
             "idx_tags_name",
         ]

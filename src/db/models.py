@@ -59,6 +59,9 @@ class Bookmark(Base):
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     pinyin_initials: Mapped[str] = mapped_column(Text, nullable=False)
+    pinyin_full: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
     tag_ids: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'[]'")
     )
@@ -74,6 +77,7 @@ class Bookmark(Base):
     __table_args__ = (
         Index("idx_bookmarks_name", "name"),
         Index("idx_bookmarks_pinyin", "pinyin_initials"),
+        Index("idx_bookmarks_pinyin_full", "pinyin_full"),
         Index("idx_bookmarks_last_used", last_used_at.desc()),
     )
 
