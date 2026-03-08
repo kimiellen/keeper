@@ -6,13 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.auth import router as auth_router
 from src.api.bookmarks import router as bookmarks_router
+from src.api.database import router as database_router
 from src.api.relations import router as relations_router
 from src.api.session import SessionManager
 from src.api.stats import router as stats_router
 from src.api.tags import router as tags_router
 from src.api.transfer import router as transfer_router
-from src.db.engine import create_engine, create_session_factory
-from src.db.models import Base
+from src.db.config import DatabaseConfig
+from src.db.engine import DEFAULT_DB_PATH, DatabaseManager
 from src.middleware.auth import AuthMiddleware
 from src.middleware.rate_limit import RateLimitMiddleware
 from src.middleware.security import SecurityHeadersMiddleware
@@ -20,14 +21,22 @@ from src.middleware.security import SecurityHeadersMiddleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    engine = create_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    app.state.engine = engine
-    app.state.session_factory = create_session_factory(engine)
+    db_config = DatabaseConfig()
+    db_manager = DatabaseManager()
+
+    current = db_config.get_current() or os.environ.get(
+        "KEEPER_DB_PATH", str(DEFAULT_DB_PATH)
+    )
+    await db_manager.initialize(current)
+    db_config.set_current(current)
+
+    app.state.db_config = db_config
+    app.state.db_manager = db_manager
+    app.state.engine = db_manager.engine
+    app.state.session_factory = db_manager.session_factory
     app.state.session_manager = SessionManager()
     yield
-    await engine.dispose()
+    await db_manager.dispose()
 
 
 app = FastAPI(title="Keeper API", version="1.0.0", lifespan=lifespan)
@@ -51,6 +60,7 @@ app.add_middleware(RateLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(auth_router)
+app.include_router(database_router)
 app.include_router(tags_router)
 app.include_router(relations_router)
 app.include_router(bookmarks_router)
