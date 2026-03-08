@@ -726,12 +726,31 @@ certs/*.pem
 __pycache__/
 .venv/
 
+
 # .gitignore（keeper-firefox）
 .env
 .output/
 node_modules/
 *.log
 ```
+
+### 推送前安全审查（强制）
+
+每次执行 `git push` 前，**必须**对即将推送的所有 commit 进行敏感信息扫描：
+
+```bash
+# 扫描 diff 中的敏感模式
+git diff origin/main..HEAD | grep -iE \
+  '(password|secret|token|api_key|apikey|private_key|credential|auth_token|access_key|bearer|jwt_secret|database_url|connection_string|smtp_pass|aws_|ssh_|-----BEGIN)'
+```
+
+**审查流程**：
+1. 执行上述扫描命令
+2. 逐条检查匹配结果，区分真实凭据和测试假数据
+3. 如发现真实敏感信息：将对应文件/模式加入 `.gitignore`，从历史中清除后再推送
+4. 确认无敏感信息后方可推送
+
+**测试用假数据不算敏感信息**（如 `"testhash"`、`"v1.AES_GCM.dGVzdG5vbmNl..."`）。
 
 ---
 
