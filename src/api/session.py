@@ -8,6 +8,7 @@ Security notes:
 - Expired sessions are cleaned on every validation call
 """
 
+import hmac
 import secrets
 import time
 from dataclasses import dataclass
@@ -41,7 +42,8 @@ class SessionManager:
     def validate(self, token: str) -> Session | None:
         if self._session is None:
             return None
-        if self._session.token != token:
+        # Security: constant-time comparison to prevent timing attacks
+        if not hmac.compare_digest(self._session.token, token):
             return None
         if time.time() > self._session.expires_at:
             self._session = None
