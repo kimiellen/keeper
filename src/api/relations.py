@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query, Request, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from src.api.schemas import (
@@ -55,11 +55,15 @@ async def list_relations(
 
 
 @router.get("/{relation_id}", response_model=None)
-async def get_relation(relation_id: int, request: Request) -> RelationResponse | Response:
+async def get_relation(
+    relation_id: int, request: Request
+) -> RelationResponse | Response:
     session_factory = request.app.state.session_factory
 
     async with session_factory() as session:
-        result = await session.execute(select(Relation).where(Relation.id == relation_id))
+        result = await session.execute(
+            select(Relation).where(Relation.id == relation_id)
+        )
         relation = result.scalar_one_or_none()
 
     if relation is None:
@@ -73,7 +77,9 @@ async def get_relation(relation_id: int, request: Request) -> RelationResponse |
 
 
 @router.post("", status_code=201, response_model=None)
-async def create_relation(body: RelationCreate, request: Request) -> RelationResponse | Response:
+async def create_relation(
+    body: RelationCreate, request: Request
+) -> RelationResponse | Response:
     session_factory = request.app.state.session_factory
 
     now = datetime.now(timezone.utc).isoformat()
@@ -109,7 +115,9 @@ async def update_relation(
     session_factory = request.app.state.session_factory
 
     async with session_factory() as session:
-        result = await session.execute(select(Relation).where(Relation.id == relation_id))
+        result = await session.execute(
+            select(Relation).where(Relation.id == relation_id)
+        )
         relation = result.scalar_one_or_none()
         if relation is None:
             return Response(
@@ -156,11 +164,16 @@ async def delete_relation(
                 media_type="application/json",
             )
 
-        bookmarks_result = await session.execute(select(Bookmark))
-        bookmarks = bookmarks_result.scalars().all()
+        # SQL-level pre-filter: only load bookmarks whose accounts JSON
+        # contains the relation_id string (candidate set)
+        candidate_r = await session.execute(
+            select(Bookmark).where(Bookmark.accounts.contains(str(relation_id)))
+        )
+        candidates = candidate_r.scalars().all()
 
+        # Python-level precise check on candidates only
         referenced = 0
-        for bookmark in bookmarks:
+        for bookmark in candidates:
             try:
                 accounts = json.loads(bookmark.accounts)
             except (TypeError, ValueError):
@@ -168,16 +181,13 @@ async def delete_relation(
             if not isinstance(accounts, list):
                 continue
 
-            found = False
             for account in accounts:
                 if not isinstance(account, dict):
                     continue
                 related_ids = account.get("relatedIds", [])
                 if isinstance(related_ids, list) and relation_id in related_ids:
-                    found = True
+                    referenced += 1
                     break
-            if found:
-                referenced += 1
 
         if not cascade and referenced > 0:
             return Response(
@@ -194,7 +204,7 @@ async def delete_relation(
             )
 
         if cascade:
-            for bookmark in bookmarks:
+            for bookmark in candidates:
                 try:
                     accounts = json.loads(bookmark.accounts)
                 except (TypeError, ValueError):

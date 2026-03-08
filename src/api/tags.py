@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query, Request, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from src.api.schemas import TagCreate, TagListResponse, TagResponse, TagUpdate
@@ -44,7 +44,9 @@ async def list_tags(
         result = await session.execute(select(Tag).order_by(order_col))
         tags = result.scalars().all()
 
-    return TagListResponse(data=[_tag_to_response(tag) for tag in tags], total=len(tags))
+    return TagListResponse(
+        data=[_tag_to_response(tag) for tag in tags], total=len(tags)
+    )
 
 
 @router.get("/{tag_id}", response_model=None)
@@ -93,7 +95,9 @@ async def create_tag(body: TagCreate, request: Request) -> TagResponse | Respons
 
 
 @router.put("/{tag_id}", response_model=None)
-async def update_tag(tag_id: int, body: TagUpdate, request: Request) -> TagResponse | Response:
+async def update_tag(
+    tag_id: int, body: TagUpdate, request: Request
+) -> TagResponse | Response:
     session_factory = request.app.state.session_factory
 
     async with session_factory() as session:
@@ -145,17 +149,12 @@ async def delete_tag(
                 media_type="application/json",
             )
 
-        bookmarks_result = await session.execute(select(Bookmark))
-        bookmarks = bookmarks_result.scalars().all()
-
-        referenced = 0
-        for bookmark in bookmarks:
-            try:
-                tag_ids = json.loads(bookmark.tag_ids)
-            except (TypeError, ValueError):
-                tag_ids = []
-            if isinstance(tag_ids, list) and tag_id in tag_ids:
-                referenced += 1
+        ref_count_r = await session.execute(
+            select(func.count())
+            .select_from(Bookmark)
+            .where(Bookmark.tag_ids.contains(str(tag_id)))
+        )
+        referenced: int = ref_count_r.scalar_one()
 
         if not cascade and referenced > 0:
             return Response(
@@ -172,15 +171,19 @@ async def delete_tag(
             )
 
         if cascade:
-            for bookmark in bookmarks:
+            affected_r = await session.execute(
+                select(Bookmark).where(Bookmark.tag_ids.contains(str(tag_id)))
+            )
+            affected_bookmarks = affected_r.scalars().all()
+            for bookmark in affected_bookmarks:
                 try:
-                    tag_ids = json.loads(bookmark.tag_ids)
+                    tag_ids_list = json.loads(bookmark.tag_ids)
                 except (TypeError, ValueError):
-                    tag_ids = []
-                if not isinstance(tag_ids, list):
-                    continue
-                if tag_id in tag_ids:
-                    bookmark.tag_ids = json.dumps([item for item in tag_ids if item != tag_id])
+                    tag_ids_list = []
+                if isinstance(tag_ids_list, list) and tag_id in tag_ids_list:
+                    bookmark.tag_ids = json.dumps(
+                        [item for item in tag_ids_list if item != tag_id]
+                    )
 
         await session.delete(tag)
         await session.commit()
