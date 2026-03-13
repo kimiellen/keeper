@@ -1,90 +1,84 @@
 """
 密钥派生模块
 
-使用 Argon2id 从主密码派生 Master Key，再通过 HKDF-SHA256 扩展为加密密钥和 MAC 密钥。
+使用 Argon2id 进行：
+1. 主密码哈希存储（用于验证）
+2. 加密密钥派生（用于 AES-256-GCM 加解密）
+
+设计原则：
+- hash_password()：每次生成随机盐，结果可用于 verify_password()
+- derive_key()：使用固定盐（PBKDF2 风格），从相同密码始终派生出相同的 32 字节密钥
 """
 
-from argon2.low_level import hash_secret_raw, Type
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives import hashes
+import hashlib
 
-# Argon2id 参数（与交互记录最终确认值一致）
-ARGON2_MEMORY_COST = 65536  # 64MB（单位：KB）
-ARGON2_TIME_COST = 3  # 迭代次数
-ARGON2_PARALLELISM = 1  # 并行度（本地单用户优化）
-ARGON2_HASH_LEN = 32  # 输出 256-bit
-ARGON2_SALT_LEN = 16  # 盐长度（字节）
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
 
-# HKDF 参数
-HKDF_OUTPUT_LEN = 64  # 扩展为 64 字节（enc_key + mac_key）
-HKDF_INFO = b"keeper-v1-key-expansion"
+# Argon2id 参数（平衡安全性与性能）
+_ph = PasswordHasher(
+    time_cost=3,  # 迭代次数
+    memory_cost=65536,  # 64 MiB 内存
+    parallelism=1,  # 并行度
+    hash_len=32,  # 输出长度 256-bit
+    salt_len=16,  # 盐长度 128-bit
+)
+
+# 派生加密密钥时使用的固定上下文标识（不作为安全盐，仅用于域隔离）
+_KEY_DERIVE_INFO = b"keeper-encryption-key-v1"
 
 
-def derive_master_key(password: str, email: str) -> bytes:
+def hash_password(password: str) -> str:
     """
-    从主密码和邮箱派生 Master Key。
+    对主密码进行 Argon2id 哈希，用于存储和后续验证。
 
-    使用 Argon2id（内存困难型 KDF），以用户邮箱前 16 字节作为盐。
+    每次调用生成不同的随机盐，返回的哈希字符串包含所有参数信息。
 
     Args:
-        password: 用户主密码
-        email: 用户邮箱（用作盐，保证唯一性）
+        password: 明文主密码
 
     Returns:
-        32 字节的 Master Key
-
-    Raises:
-        ValueError: 密码或邮箱为空
+        Argon2id 哈希字符串（含算法参数和盐）
     """
-    if not password:
-        raise ValueError("Password must not be empty")
-    if not email:
-        raise ValueError("Email must not be empty")
-
-    salt = email.encode("utf-8")[:ARGON2_SALT_LEN].ljust(ARGON2_SALT_LEN, b"\x00")
-
-    master_key = hash_secret_raw(
-        secret=password.encode("utf-8"),
-        salt=salt,
-        time_cost=ARGON2_TIME_COST,
-        memory_cost=ARGON2_MEMORY_COST,
-        parallelism=ARGON2_PARALLELISM,
-        hash_len=ARGON2_HASH_LEN,
-        type=Type.ID,
-    )
-
-    return master_key
+    return _ph.hash(password)
 
 
-def expand_master_key(master_key: bytes) -> tuple[bytes, bytes]:
+def verify_password(password: str, password_hash: str) -> bool:
     """
-    使用 HKDF-SHA256 将 Master Key 扩展为加密密钥和 MAC 密钥。
+    验证明文密码是否与存储的 Argon2id 哈希匹配。
 
     Args:
-        master_key: 32 字节的 Master Key（由 derive_master_key 生成）
+        password: 待验证的明文密码
+        password_hash: 存储的 Argon2id 哈希字符串
 
     Returns:
-        (enc_key, mac_key) 元组，各 32 字节
-            - enc_key: AES-256-GCM 加密密钥
-            - mac_key: 预留 MAC 密钥（AES-GCM 自带认证，保留以便未来扩展）
-
-    Raises:
-        ValueError: master_key 长度不是 32 字节
+        验证通过返回 True，否则返回 False
     """
-    if len(master_key) != ARGON2_HASH_LEN:
-        raise ValueError(
-            f"Master key must be {ARGON2_HASH_LEN} bytes, got {len(master_key)}"
-        )
+    try:
+        return _ph.verify(password_hash, password)
+    except (VerifyMismatchError, VerificationError, InvalidHashError):
+        return False
 
-    hkdf = HKDF(
-        algorithm=hashes.SHA256(),
-        length=HKDF_OUTPUT_LEN,
-        salt=None,
-        info=HKDF_INFO,
+
+def derive_key(password: str) -> bytes:
+    """
+    从主密码确定性派生 32 字节加密密钥（AES-256 用）。
+
+    使用 PBKDF2-HMAC-SHA256 配合固定的上下文盐，确保相同密码始终生成相同密钥。
+    注意：此函数不替代 hash_password()，两者用途不同：
+    - hash_password() 用于验证密码（随机盐，不可逆推密钥）
+    - derive_key() 用于派生加密密钥（固定盐，可重现）
+
+    Args:
+        password: 明文主密码
+
+    Returns:
+        32 字节加密密钥（bytes）
+    """
+    return hashlib.pbkdf2_hmac(
+        hash_name="sha256",
+        password=password.encode("utf-8"),
+        salt=_KEY_DERIVE_INFO,
+        iterations=100_000,
+        dklen=32,
     )
-
-    expanded = hkdf.derive(master_key)
-    enc_key = expanded[:32]
-    mac_key = expanded[32:]
-
-    return enc_key, mac_key
