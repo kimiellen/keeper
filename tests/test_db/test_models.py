@@ -41,7 +41,7 @@ class TestTagModel:
         db_session.add(tag)
         await db_session.commit()
         await db_session.refresh(tag)
-        assert tag.color == "#6B7280"
+        assert tag.color == "#3B82F6"
 
     @pytest.mark.asyncio
     async def test_icon_default(self, db_session):
@@ -346,9 +346,7 @@ class TestAuthenticationModel:
         auth = Authentication(
             id=1,
             email="user@example.com",
-            master_password_hash="$argon2id$hash",
-            encrypted_user_key="v1.AES_GCM.nonce.ct.tag",
-            recovery_code_hash="$argon2id$recovery",
+            password_hash="$argon2id$hash",
             created_at=NOW,
             last_login=NOW,
         )
@@ -361,32 +359,11 @@ class TestAuthenticationModel:
         assert fetched.id == 1
 
     @pytest.mark.asyncio
-    async def test_kdf_defaults(self, db_session):
-        auth = Authentication(
-            id=1,
-            email="user@example.com",
-            master_password_hash="hash",
-            encrypted_user_key="enc",
-            recovery_code_hash="rec",
-            created_at=NOW,
-            last_login=NOW,
-        )
-        db_session.add(auth)
-        await db_session.commit()
-        await db_session.refresh(auth)
-        assert auth.kdf_algorithm == "argon2id"
-        assert auth.kdf_iterations == 3
-        assert auth.kdf_memory == 65536
-        assert auth.kdf_parallelism == 1
-
-    @pytest.mark.asyncio
     async def test_single_user_constraint_id_2(self, db_session):
         auth = Authentication(
             id=2,
             email="bad@example.com",
-            master_password_hash="hash",
-            encrypted_user_key="enc",
-            recovery_code_hash="rec",
+            password_hash="hash",
             created_at=NOW,
             last_login=NOW,
         )
@@ -399,9 +376,7 @@ class TestAuthenticationModel:
         auth = Authentication(
             id=0,
             email="zero@example.com",
-            master_password_hash="hash",
-            encrypted_user_key="enc",
-            recovery_code_hash="rec",
+            password_hash="hash",
             created_at=NOW,
             last_login=NOW,
         )
@@ -414,9 +389,7 @@ class TestAuthenticationModel:
         auth1 = Authentication(
             id=1,
             email="dup@example.com",
-            master_password_hash="hash",
-            encrypted_user_key="enc",
-            recovery_code_hash="rec",
+            password_hash="hash",
             created_at=NOW,
             last_login=NOW,
         )
@@ -427,9 +400,7 @@ class TestAuthenticationModel:
         auth2 = Authentication(
             id=1,
             email="dup@example.com",
-            master_password_hash="hash2",
-            encrypted_user_key="enc2",
-            recovery_code_hash="rec2",
+            password_hash="hash2",
             created_at=NOW,
             last_login=NOW,
         )
@@ -438,34 +409,11 @@ class TestAuthenticationModel:
             await db_session.commit()
 
     @pytest.mark.asyncio
-    async def test_custom_kdf_params(self, db_session):
-        auth = Authentication(
-            id=1,
-            email="custom@example.com",
-            master_password_hash="hash",
-            encrypted_user_key="enc",
-            recovery_code_hash="rec",
-            kdf_algorithm="argon2id",
-            kdf_iterations=5,
-            kdf_memory=131072,
-            kdf_parallelism=2,
-            created_at=NOW,
-            last_login=NOW,
-        )
-        db_session.add(auth)
-        await db_session.commit()
-        assert auth.kdf_iterations == 5
-        assert auth.kdf_memory == 131072
-        assert auth.kdf_parallelism == 2
-
-    @pytest.mark.asyncio
     async def test_repr(self, db_session):
         auth = Authentication(
             id=1,
             email="repr@example.com",
-            master_password_hash="h",
-            encrypted_user_key="e",
-            recovery_code_hash="r",
+            password_hash="h",
             created_at=NOW,
             last_login=NOW,
         )

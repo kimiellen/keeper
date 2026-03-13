@@ -16,7 +16,7 @@ class Tag(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     color: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'#6B7280'")
+        Text, nullable=False, server_default=text("'#3B82F6'")
     )
     icon: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
@@ -92,21 +92,7 @@ class Authentication(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    master_password_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    encrypted_user_key: Mapped[str] = mapped_column(Text, nullable=False)
-    recovery_code_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    kdf_algorithm: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'argon2id'")
-    )
-    kdf_iterations: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("3")
-    )
-    kdf_memory: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("65536")
-    )
-    kdf_parallelism: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("1")
-    )
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     last_login: Mapped[str] = mapped_column(Text, nullable=False)
 
