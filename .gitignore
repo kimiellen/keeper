@@ -1,20 +1,66 @@
+# ===== Python =====
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-env/
-venv/
-.venv/
 *.egg-info/
 dist/
 build/
+.Python
+
+# ===== 虚拟环境 =====
+.venv/
+venv/
+env/
+
+# ===== 测试 =====
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.tox/
+
+# ===== 代码质量工具 =====
+.ruff_cache/
+.mypy_cache/
+
+# ===== 数据库文件 =====
 *.db
 *.sqlite
+*.sqlite3
+
+# ===== 隐私 / 密钥 / 证书 =====
 .env
 .env.local
-.DS_Store
+.env.*.local
 certs/
-.coverage
-note.md
+
+# ===== 本地配置 =====
+.python-version
+
+# ===== 文档（本地开发用，不入库） =====
 docs/
+*.md
+!README.md
+!CONTRIBUTING.md
+
+# ===== OpenCode / OMO =====
+.sisyphus/
+.opencode/
+.omo/
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ===== 其他 =====
+tsconfig.json
+main.py
+keeper加密机制.md
