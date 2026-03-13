@@ -32,16 +32,11 @@ class TestScenario1_Initialize:
 
         resp = await client.post(
             "/api/auth/unlock",
-            json={"masterPasswordHash": INIT_PAYLOAD["masterPasswordHash"]},
+            json={"password": INIT_PAYLOAD["password"]},
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["encryptedUserKey"] == INIT_PAYLOAD["encryptedUserKey"]
-        assert data["kdfParams"]["algorithm"] == "Argon2id"
-        assert data["kdfParams"]["memory"] == 65536
-        assert data["kdfParams"]["iterations"] == 3
-        assert data["kdfParams"]["parallelism"] == 1
-        assert data["kdfParams"]["salt"] == INIT_PAYLOAD["email"]
+        assert data["message"] == "解锁成功"
 
     @pytest.mark.asyncio
     async def test_double_initialize_rejected(self, client: AsyncClient):
@@ -78,7 +73,7 @@ class TestScenario2_Unlock:
         await client.post("/api/auth/initialize", json=INIT_PAYLOAD)
         resp = await client.post(
             "/api/auth/unlock",
-            json={"masterPasswordHash": "wrong_hash"},
+            json={"password": "wrong_hash"},
         )
         assert resp.status_code == 403
 
@@ -227,7 +222,8 @@ class TestScenario3_BookmarkCRUD:
                 "accounts": [{"username": "user", "password": "plaintext_password"}],
             },
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 201
+        assert resp.json()["accounts"][0]["password"] == "plaintext_password"
 
     @pytest.mark.asyncio
     async def test_use_bookmark_updates_timestamps(self, authed_client: AsyncClient):

@@ -30,15 +30,7 @@ async def _reset_db():
 
 INIT_PAYLOAD = {
     "email": "test@example.com",
-    "masterPasswordHash": "argon2id$v=19$m=65536,t=3,p=1$dGVzdA$testhash",
-    "encryptedUserKey": "v1.AES_GCM.nonce.ciphertext.tag",
-    "kdfParams": {
-        "algorithm": "Argon2id",
-        "memory": 65536,
-        "iterations": 3,
-        "parallelism": 1,
-        "salt": "dGVzdA",
-    },
+    "password": "MySecurePassword123",
 }
 
 
@@ -46,7 +38,7 @@ async def auth(client: AsyncClient) -> dict[str, str]:
     _ = await client.post("/api/auth/initialize", json=INIT_PAYLOAD)
     resp = await client.post(
         "/api/auth/unlock",
-        json={"masterPasswordHash": INIT_PAYLOAD["masterPasswordHash"]},
+        json={"password": INIT_PAYLOAD["password"]},
     )
     return dict(resp.cookies)
 

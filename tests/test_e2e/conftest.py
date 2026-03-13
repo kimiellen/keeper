@@ -1,6 +1,7 @@
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from typing import Any
 
 from src.api.session import SessionManager
 from src.db.engine import create_engine, create_session_factory
@@ -9,15 +10,7 @@ from src.main import app
 
 INIT_PAYLOAD = {
     "email": "test@example.com",
-    "masterPasswordHash": "argon2id$v=19$m=65536,t=3,p=1$dGVzdA$testhash",
-    "encryptedUserKey": "v1.AES_GCM.nonce.ciphertext.tag",
-    "kdfParams": {
-        "algorithm": "Argon2id",
-        "memory": 65536,
-        "iterations": 3,
-        "parallelism": 1,
-        "salt": "dGVzdA",
-    },
+    "password": "MySecurePassword123",
 }
 
 ENCRYPTED_PASSWORD = "v1.AES_GCM.dGVzdG5vbmNl.Y2lwaGVydGV4dA.dGFn"
@@ -53,7 +46,7 @@ async def authed_client(client: AsyncClient):
 
     resp = await client.post(
         "/api/auth/unlock",
-        json={"masterPasswordHash": INIT_PAYLOAD["masterPasswordHash"]},
+        json={"password": INIT_PAYLOAD["password"]},
     )
     assert resp.status_code == 200
 
@@ -62,7 +55,7 @@ async def authed_client(client: AsyncClient):
 
 async def seed_tag(
     client: AsyncClient, name: str, color: str = "#FF5733", icon: str = "star"
-) -> dict:
+) -> dict[str, Any]:
     """创建一个标签并返回响应 JSON。"""
     resp = await client.post(
         "/api/tags", json={"name": name, "color": color, "icon": icon}
@@ -71,7 +64,9 @@ async def seed_tag(
     return resp.json()
 
 
-async def seed_relation(client: AsyncClient, name: str, type_: str = "email") -> dict:
+async def seed_relation(
+    client: AsyncClient, name: str, type_: str = "email"
+) -> dict[str, Any]:
     """创建一个关联并返回响应 JSON。"""
     resp = await client.post("/api/relations", json={"name": name, "type": type_})
     assert resp.status_code == 201, f"seed_relation failed: {resp.text}"
@@ -81,14 +76,14 @@ async def seed_relation(client: AsyncClient, name: str, type_: str = "email") ->
 async def seed_bookmark(
     client: AsyncClient,
     name: str,
-    urls: list[dict] | None = None,
+    urls: list[dict[str, Any]] | None = None,
     tag_ids: list[int] | None = None,
-    accounts: list[dict] | None = None,
+    accounts: list[dict[str, Any]] | None = None,
     notes: str = "",
     pinyin_initials: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """创建一个书签并返回响应 JSON。"""
-    body: dict = {"name": name, "notes": notes}
+    body: dict[str, Any] = {"name": name, "notes": notes}
     if urls is not None:
         body["urls"] = urls
     if tag_ids is not None:

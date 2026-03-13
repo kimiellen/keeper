@@ -4,7 +4,6 @@ import time
 import pytest
 
 from src.crypto.encryption import EncryptionService
-from src.crypto.kdf import derive_master_key, expand_master_key
 
 
 @pytest.mark.asyncio
@@ -61,43 +60,3 @@ async def test_encrypt_decrypt_round_trip() -> None:
     )
 
     assert max_ms < 10.0, f"Round-trip too slow: max {max_ms:.4f}ms >= 10ms"
-
-
-@pytest.mark.asyncio
-async def test_kdf_derive_master_key() -> None:
-    durations: list[float] = []
-    derived_keys: list[bytes] = []
-
-    for _ in range(5):
-        start = time.perf_counter()
-        derived_keys.append(derive_master_key("test_password", "test@example.com"))
-        durations.append(time.perf_counter() - start)
-
-    avg_seconds = sum(durations) / len(durations)
-    max_seconds = max(durations)
-    print(
-        f"[CRYPTO PERF] derive_master_key x5: avg={avg_seconds * 1000:.2f}ms max={max_seconds * 1000:.2f}ms"
-    )
-
-    assert all(len(key) == 32 for key in derived_keys)
-    assert max_seconds < 5.0, f"derive_master_key too slow: {max_seconds:.3f}s >= 5.0s"
-
-
-@pytest.mark.asyncio
-async def test_hkdf_expand_1000_times() -> None:
-    master_key = derive_master_key("test_password", "test@example.com")
-
-    start = time.perf_counter()
-    expanded = [expand_master_key(master_key) for _ in range(1000)]
-    elapsed = time.perf_counter() - start
-    avg_ms = (elapsed / 1000) * 1000
-
-    print(
-        f"[CRYPTO PERF] expand_master_key x1000: total={elapsed * 1000:.2f}ms avg={avg_ms:.4f}ms/op"
-    )
-
-    assert len(expanded) == 1000
-    assert all(
-        len(enc_key) == 32 and len(mac_key) == 32 for enc_key, mac_key in expanded
-    )
-    assert avg_ms < 1.0, f"HKDF expand too slow: {avg_ms:.4f}ms/op >= 1ms/op"

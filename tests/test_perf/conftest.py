@@ -13,15 +13,7 @@ from src.main import app
 
 INIT_PAYLOAD = {
     "email": "test@example.com",
-    "masterPasswordHash": "argon2id$v=19$m=65536,t=3,p=1$dGVzdA$testhash",
-    "encryptedUserKey": "v1.AES_GCM.nonce.ciphertext.tag",
-    "kdfParams": {
-        "algorithm": "Argon2id",
-        "memory": 65536,
-        "iterations": 3,
-        "parallelism": 1,
-        "salt": "dGVzdA",
-    },
+    "password": "MySecurePassword123",
 }
 
 ENCRYPTED_PASSWORD = "v1.AES_GCM.dGVzdG5vbmNl.Y2lwaGVydGV4dA.dGFn"
@@ -53,7 +45,7 @@ async def authed_client(client: AsyncClient):
 
     resp = await client.post(
         "/api/auth/unlock",
-        json={"masterPasswordHash": INIT_PAYLOAD["masterPasswordHash"]},
+        json={"password": INIT_PAYLOAD["password"]},
     )
     assert resp.status_code == 200
 

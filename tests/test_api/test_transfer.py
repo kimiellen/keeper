@@ -1,14 +1,13 @@
 import csv
 import io
 import json
-import os
+from typing import Any
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from src.api.session import SessionManager
-from src.crypto.encryption import EncryptionService
 from src.main import app
 
 
@@ -36,39 +35,22 @@ async def _reset_db():
 
 INIT_PAYLOAD = {
     "email": "test@example.com",
-    "masterPasswordHash": "argon2id$v=19$m=65536,t=3,p=1$dGVzdA$testhash",
-    "encryptedUserKey": "v1.AES_GCM.nonce.ciphertext.tag",
-    "kdfParams": {
-        "algorithm": "Argon2id",
-        "memory": 65536,
-        "iterations": 3,
-        "parallelism": 1,
-        "salt": "dGVzdA",
-    },
+    "password": "MySecurePassword123",
 }
-
-USER_KEY = os.urandom(32)
-USER_KEY_HEX = USER_KEY.hex()
-ENC_SERVICE = EncryptionService(USER_KEY)
-
-
-def _enc(plaintext: str) -> str:
-    """加密明文密码。"""
-    return ENC_SERVICE.encrypt(plaintext)
 
 
 async def auth(client: AsyncClient) -> dict[str, str]:
     await client.post("/api/auth/initialize", json=INIT_PAYLOAD)
     resp = await client.post(
         "/api/auth/unlock",
-        json={"masterPasswordHash": INIT_PAYLOAD["masterPasswordHash"]},
+        json={"password": INIT_PAYLOAD["password"]},
     )
     return dict(resp.cookies)
 
 
 async def create_tag(
     client: AsyncClient, cookies: dict[str, str], name: str
-) -> dict[str, object]:
+) -> dict[str, Any]:
     resp = await client.post(
         "/api/tags",
         json={"name": name, "color": "#112233", "icon": "tag"},
@@ -80,7 +62,7 @@ async def create_tag(
 
 async def create_relation(
     client: AsyncClient, cookies: dict[str, str], name: str
-) -> dict[str, object]:
+) -> dict[str, Any]:
     resp = await client.post(
         "/api/relations",
         json={"name": name, "type": "other"},
@@ -95,10 +77,10 @@ async def create_bookmark(
     cookies: dict[str, str],
     name: str = "Test",
     tag_ids: list[int] | None = None,
-    accounts: list[dict] | None = None,
-    urls: list[dict] | None = None,
-) -> dict:
-    payload: dict = {
+    accounts: list[dict[str, Any]] | None = None,
+    urls: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "name": name,
         "urls": urls or [{"url": "https://example.com"}],
     }
@@ -118,31 +100,25 @@ async def create_bookmark(
 
 class TestExportJson:
     @pytest.mark.asyncio
-    async def test_export_json_missing_key(self, client: AsyncClient):
+    async def test_export_json_unauthorized_without_session(self, client: AsyncClient):
+        resp = await client.get("/api/transfer/export/json")
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_export_json_unauthorized_after_lock(self, client: AsyncClient):
         cookies = await auth(client)
+        lock_resp = await client.post("/api/auth/lock", cookies=cookies)
+        assert lock_resp.status_code == 204
+
         resp = await client.get("/api/transfer/export/json", cookies=cookies)
-        assert resp.status_code == 400
-        assert "缺少用户密钥" in resp.json()["title"]
+        assert resp.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_export_json_invalid_key(self, client: AsyncClient):
-        cookies = await auth(client)
-        resp = await client.get(
-            "/api/transfer/export/json",
-            cookies=cookies,
-            headers={"X-User-Key": "not-hex"},
-        )
-        assert resp.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_export_json_short_key(self, client: AsyncClient):
-        cookies = await auth(client)
-        resp = await client.get(
-            "/api/transfer/export/json",
-            cookies=cookies,
-            headers={"X-User-Key": "aa" * 16},  # 16 bytes, need 32
-        )
-        assert resp.status_code == 400
+    async def test_export_json_unauthorized_without_cookie(self, client: AsyncClient):
+        _ = await auth(client)
+        client.cookies.clear()
+        resp = await client.get("/api/transfer/export/json")
+        assert resp.status_code == 401
 
     @pytest.mark.asyncio
     async def test_export_json_empty_db(self, client: AsyncClient):
@@ -150,7 +126,6 @@ class TestExportJson:
         resp = await client.get(
             "/api/transfer/export/json",
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -165,7 +140,7 @@ class TestExportJson:
         cookies = await auth(client)
         tag = await create_tag(client, cookies, "工作")
         rel = await create_relation(client, cookies, "手机号")
-        encrypted_pw = _enc("secret123")
+        encrypted_pw = "secret123"
         await create_bookmark(
             client,
             cookies,
@@ -183,7 +158,6 @@ class TestExportJson:
         resp = await client.get(
             "/api/transfer/export/json",
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -204,8 +178,8 @@ class TestExportJson:
     async def test_export_json_decrypts_passwords(self, client: AsyncClient):
         """验证导出时密码被正确解密为明文。"""
         cookies = await auth(client)
-        pw1 = _enc("alpha")
-        pw2 = _enc("beta")
+        pw1 = "alpha"
+        pw2 = "beta"
         await create_bookmark(
             client,
             cookies,
@@ -218,7 +192,6 @@ class TestExportJson:
         resp = await client.get(
             "/api/transfer/export/json",
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         data = resp.json()
         accounts = data["data"]["bookmarks"][0]["accounts"]
@@ -233,10 +206,9 @@ class TestExportJson:
 
 class TestExportCsv:
     @pytest.mark.asyncio
-    async def test_export_csv_missing_key(self, client: AsyncClient):
-        cookies = await auth(client)
-        resp = await client.get("/api/transfer/export/csv", cookies=cookies)
-        assert resp.status_code == 400
+    async def test_export_csv_unauthorized_without_session(self, client: AsyncClient):
+        resp = await client.get("/api/transfer/export/csv")
+        assert resp.status_code == 401
 
     @pytest.mark.asyncio
     async def test_export_csv_empty_db(self, client: AsyncClient):
@@ -244,7 +216,6 @@ class TestExportCsv:
         resp = await client.get(
             "/api/transfer/export/csv",
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert resp.status_code == 200
         assert "text/csv" in resp.headers["content-type"]
@@ -256,7 +227,7 @@ class TestExportCsv:
     async def test_export_csv_with_data(self, client: AsyncClient):
         cookies = await auth(client)
         tag = await create_tag(client, cookies, "社交")
-        encrypted_pw = _enc("mypass")
+        encrypted_pw = "mypass"
         await create_bookmark(
             client,
             cookies,
@@ -268,7 +239,6 @@ class TestExportCsv:
         resp = await client.get(
             "/api/transfer/export/csv",
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert resp.status_code == 200
         reader = csv.DictReader(io.StringIO(resp.text))
@@ -285,8 +255,8 @@ class TestExportCsv:
     async def test_export_csv_multiple_accounts(self, client: AsyncClient):
         """一个书签有多个账户时, CSV 每个账户一行。"""
         cookies = await auth(client)
-        pw1 = _enc("pw1")
-        pw2 = _enc("pw2")
+        pw1 = "pw1"
+        pw2 = "pw2"
         await create_bookmark(
             client,
             cookies,
@@ -299,7 +269,6 @@ class TestExportCsv:
         resp = await client.get(
             "/api/transfer/export/csv",
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         reader = csv.DictReader(io.StringIO(resp.text))
         rows = list(reader)
@@ -317,7 +286,6 @@ class TestExportCsv:
         resp = await client.get(
             "/api/transfer/export/csv",
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         reader = csv.DictReader(io.StringIO(resp.text))
         rows = list(reader)
@@ -468,9 +436,9 @@ class TestImportPreview:
 class TestImportKeeperJson:
     def _make_keeper_export(
         self,
-        bookmarks: list[dict],
-        tags: list[dict] | None = None,
-        relations: list[dict] | None = None,
+        bookmarks: list[dict[str, Any]],
+        tags: list[dict[str, Any]] | None = None,
+        relations: list[dict[str, Any]] | None = None,
     ) -> str:
         return json.dumps(
             {
@@ -484,17 +452,15 @@ class TestImportKeeperJson:
         )
 
     @pytest.mark.asyncio
-    async def test_import_missing_key(self, client: AsyncClient):
-        cookies = await auth(client)
+    async def test_import_unauthorized_without_session(self, client: AsyncClient):
         resp = await client.post(
             "/api/transfer/import",
             json={
                 "format": "keeper_json",
                 "content": self._make_keeper_export([]),
             },
-            cookies=cookies,
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 401
 
     @pytest.mark.asyncio
     async def test_import_basic(self, client: AsyncClient):
@@ -521,7 +487,6 @@ class TestImportKeeperJson:
             "/api/transfer/import",
             json={"format": "keeper_json", "content": content},
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -566,7 +531,6 @@ class TestImportKeeperJson:
             "/api/transfer/import",
             json={"format": "keeper_json", "content": content},
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         data = resp.json()
         assert data["imported"]["bookmarks"] == 1
@@ -612,7 +576,6 @@ class TestImportKeeperJson:
                 "conflictPolicy": "skip",
             },
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         data = resp.json()
         assert data["imported"]["bookmarks"] == 1
@@ -638,7 +601,6 @@ class TestImportKeeperJson:
                 "conflictPolicy": "rename",
             },
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         data = resp.json()
         assert data["imported"]["bookmarks"] == 1
@@ -672,7 +634,6 @@ class TestImportKeeperJson:
                 "conflictPolicy": "overwrite",
             },
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         data = resp.json()
         assert data["imported"]["bookmarks"] == 1
@@ -689,7 +650,6 @@ class TestImportKeeperJson:
             "/api/transfer/import",
             json={"format": "keeper_json", "content": "bad"},
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert resp.status_code == 422
 
@@ -707,7 +667,6 @@ class TestImportKeeperJson:
             "/api/transfer/import",
             json={"format": "keeper_json", "content": content},
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         data = resp.json()
         assert data["imported"]["bookmarks"] == 1
@@ -727,8 +686,8 @@ class TestImportKeeperJson:
 class TestImportBitwardenJson:
     def _make_bitwarden_export(
         self,
-        items: list[dict],
-        folders: list[dict] | None = None,
+        items: list[dict[str, Any]],
+        folders: list[dict[str, Any]] | None = None,
     ) -> str:
         return json.dumps(
             {
@@ -759,7 +718,6 @@ class TestImportBitwardenJson:
             "/api/transfer/import",
             json={"format": "bitwarden_json", "content": content},
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -797,7 +755,6 @@ class TestImportBitwardenJson:
             "/api/transfer/import",
             json={"format": "bitwarden_json", "content": content},
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         data = resp.json()
         assert data["imported"]["bookmarks"] == 2
@@ -826,7 +783,6 @@ class TestImportBitwardenJson:
             "/api/transfer/import",
             json={"format": "bitwarden_json", "content": content},
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         data = resp.json()
         assert data["imported"]["bookmarks"] == 1
@@ -841,7 +797,6 @@ class TestImportBitwardenJson:
                 "content": json.dumps({"encrypted": True, "items": []}),
             },
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert resp.status_code == 422
 
@@ -867,7 +822,6 @@ class TestImportBitwardenJson:
                 "conflictPolicy": "rename",
             },
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         data = resp.json()
         assert data["imported"]["bookmarks"] == 1
@@ -894,7 +848,6 @@ class TestImportBitwardenJson:
             "/api/transfer/import",
             json={"format": "bitwarden_json", "content": content},
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert resp.status_code == 200
 
@@ -902,7 +855,6 @@ class TestImportBitwardenJson:
         export_resp = await client.get(
             "/api/transfer/export/json",
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         export_data = export_resp.json()
         bm = export_data["data"]["bookmarks"][0]
@@ -926,7 +878,6 @@ class TestImportCsv:
             "/api/transfer/import",
             json={"format": "csv", "content": csv_content},
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -945,7 +896,6 @@ class TestImportCsv:
             "/api/transfer/import",
             json={"format": "csv", "content": csv_content},
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         data = resp.json()
         assert data["imported"]["bookmarks"] == 2
@@ -967,7 +917,6 @@ class TestImportCsv:
             "/api/transfer/import",
             json={"format": "csv", "content": csv_content},
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert resp.status_code == 200
 
@@ -975,7 +924,6 @@ class TestImportCsv:
         export_resp = await client.get(
             "/api/transfer/export/json",
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         export_data = export_resp.json()
         bm = export_data["data"]["bookmarks"][0]
@@ -999,7 +947,6 @@ class TestImportCsv:
                 "conflictPolicy": "skip",
             },
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         data = resp.json()
         assert data["imported"]["bookmarks"] == 1
@@ -1022,7 +969,6 @@ class TestImportCsv:
                 "conflictPolicy": "overwrite",
             },
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         data = resp.json()
         assert data["imported"]["bookmarks"] == 1
@@ -1037,7 +983,6 @@ class TestImportCsv:
             "/api/transfer/import",
             json={"format": "csv", "content": "a,b\n1,2\n"},
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert resp.status_code == 422
 
@@ -1062,7 +1007,7 @@ class TestAcceptanceJsonRoundTrip:
         rel = await create_relation(client, cookies, "邮箱")
 
         pw_plain = "round_trip_password"
-        encrypted_pw = _enc(pw_plain)
+        encrypted_pw = pw_plain
         bm = await create_bookmark(
             client,
             cookies,
@@ -1082,7 +1027,6 @@ class TestAcceptanceJsonRoundTrip:
         export_resp = await client.get(
             "/api/transfer/export/json",
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert export_resp.status_code == 200
         exported_json = export_resp.text
@@ -1103,7 +1047,6 @@ class TestAcceptanceJsonRoundTrip:
                 "conflictPolicy": "rename",
             },
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert import_resp.status_code == 200
         import_data = import_resp.json()
@@ -1113,7 +1056,6 @@ class TestAcceptanceJsonRoundTrip:
         export2_resp = await client.get(
             "/api/transfer/export/json",
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         export2_data = export2_resp.json()
         bms = export2_data["data"]["bookmarks"]
@@ -1165,7 +1107,6 @@ class TestAcceptanceBitwardenImport:
             "/api/transfer/import",
             json={"format": "bitwarden_json", "content": bw_data},
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert import_resp.status_code == 200
         assert import_resp.json()["imported"]["bookmarks"] == 1
@@ -1174,7 +1115,6 @@ class TestAcceptanceBitwardenImport:
         export_resp = await client.get(
             "/api/transfer/export/json",
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         export_data = export_resp.json()
         bm = export_data["data"]["bookmarks"][0]
@@ -1197,7 +1137,7 @@ class TestAcceptanceCsvPlaintextEncrypt:
         """
         cookies = await auth(client)
         original_pw = "csv_test_password"
-        encrypted_pw = _enc(original_pw)
+        encrypted_pw = original_pw
 
         await create_bookmark(
             client,
@@ -1216,7 +1156,6 @@ class TestAcceptanceCsvPlaintextEncrypt:
         csv_resp = await client.get(
             "/api/transfer/export/csv",
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert csv_resp.status_code == 200
         reader = csv.DictReader(io.StringIO(csv_resp.text))
@@ -1232,7 +1171,6 @@ class TestAcceptanceCsvPlaintextEncrypt:
                 "conflictPolicy": "rename",
             },
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         assert import_resp.status_code == 200
         assert import_resp.json()["imported"]["bookmarks"] == 1
@@ -1241,7 +1179,6 @@ class TestAcceptanceCsvPlaintextEncrypt:
         json_resp = await client.get(
             "/api/transfer/export/json",
             cookies=cookies,
-            headers={"X-User-Key": USER_KEY_HEX},
         )
         json_data = json_resp.json()
         bms = json_data["data"]["bookmarks"]
