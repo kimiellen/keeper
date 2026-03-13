@@ -10,9 +10,10 @@ from src.api.schemas import (
     DatabaseListResponse,
     DatabaseOpenRequest,
     DatabaseOpenResponse,
-    KdfParams,
+    DatabaseRemoveRequest,
 )
 from src.api.session import SessionManager
+from src.crypto.kdf import hash_password
 from src.db.config import DatabaseConfig
 from src.db.engine import DatabaseManager
 from src.db.models import Authentication
@@ -34,10 +35,22 @@ def _clear_session_cookie(response: Response) -> None:
 async def list_databases(request: Request) -> DatabaseListResponse:
     db_config: DatabaseConfig = request.app.state.db_config
     raw = db_config.get_databases()
-    databases = [DatabaseInfo(path=db["path"], name=db["name"]) for db in raw]
+
+    existing = [db for db in raw if Path(db["path"]).exists()]
+
+    if len(existing) < len(raw):
+        config = db_config.load()
+        config["databases"] = existing
+        if config.get("current") and not Path(config["current"]).exists():
+            config["current"] = None
+        db_config.save(config)
+
+    databases = [DatabaseInfo(path=db["path"], name=db["name"]) for db in existing]
+    current = db_config.get_current()
+
     return DatabaseListResponse(
         databases=databases,
-        current=db_config.get_current(),
+        current=current,
     )
 
 
@@ -45,7 +58,7 @@ async def list_databases(request: Request) -> DatabaseListResponse:
 async def open_database(
     body: DatabaseOpenRequest, request: Request
 ) -> DatabaseOpenResponse | Response:
-    path = body.path.strip()
+    path = str(Path(body.path.strip()).expanduser())
 
     if not Path(path).exists():
         return Response(
@@ -74,7 +87,7 @@ async def open_database(
 async def create_database(
     body: DatabaseCreateRequest, request: Request
 ) -> DatabaseCreateResponse | Response:
-    path = body.path.strip()
+    path = str(Path(body.path.strip()).expanduser())
 
     if Path(path).exists():
         return Response(
@@ -106,13 +119,7 @@ async def create_database(
         auth_record = Authentication(
             id=1,
             email=body.email,
-            master_password_hash=body.masterPasswordHash,
-            encrypted_user_key=body.encryptedUserKey,
-            recovery_code_hash="",
-            kdf_algorithm=body.kdfParams.algorithm,
-            kdf_iterations=body.kdfParams.iterations,
-            kdf_memory=body.kdfParams.memory,
-            kdf_parallelism=body.kdfParams.parallelism,
+            password_hash=hash_password(body.password),
             created_at=now,
             last_login=now,
         )
@@ -123,3 +130,29 @@ async def create_database(
     session_manager.revoke()
 
     return DatabaseCreateResponse(name=Path(path).name)
+
+
+@router.post("/remove", status_code=204)
+async def remove_database(body: DatabaseRemoveRequest, request: Request) -> Response:
+    path = str(Path(body.path.strip()).expanduser())
+
+    db_config: DatabaseConfig = request.app.state.db_config
+
+    known_paths = [db["path"] for db in db_config.get_databases()]
+    if path not in known_paths:
+        return Response(
+            content='{"type":"https://keeper.local/errors/db-not-found","title":"数据库未关联","status":404,"detail":"指定路径的数据库不在已知列表中"}',
+            status_code=404,
+            media_type="application/json",
+        )
+
+    is_current = db_config.get_current() == path
+    if is_current:
+        return Response(
+            content='{"type":"https://keeper.local/errors/db-in-use","title":"数据库正在使用","status":409,"detail":"无法移除当前正在使用的数据库"}',
+            status_code=409,
+            media_type="application/json",
+        )
+
+    db_config.remove_database(path)
+    return Response(status_code=204)

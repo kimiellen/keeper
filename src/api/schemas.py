@@ -5,19 +5,9 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-class KdfParams(BaseModel):
-    algorithm: str = Field(default="Argon2id")
-    memory: int = Field(default=65536)
-    iterations: int = Field(default=3)
-    parallelism: int = Field(default=1)
-    salt: str
-
-
 class InitializeRequest(BaseModel):
     email: str = Field(min_length=1)
-    masterPasswordHash: str = Field(min_length=1)
-    encryptedUserKey: str = Field(min_length=1)
-    kdfParams: KdfParams
+    password: str = Field(min_length=1)
 
 
 class InitializeResponse(BaseModel):
@@ -25,13 +15,15 @@ class InitializeResponse(BaseModel):
 
 
 class UnlockRequest(BaseModel):
-    masterPasswordHash: str = Field(min_length=1)
+    password: str = Field(min_length=1)
 
 
 class UnlockResponse(BaseModel):
     message: str = "解锁成功"
-    encryptedUserKey: str
-    kdfParams: KdfParams
+
+
+class AuthInfoResponse(BaseModel):
+    email: str
 
 
 class StatusResponseUnlocked(BaseModel):
@@ -99,7 +91,7 @@ class UrlItem(BaseModel):
 
 class AccountCreate(BaseModel):
     username: str = Field(min_length=1, max_length=200)
-    password: str = Field(pattern=r"^v1\.AES_GCM\..*")
+    password: str = Field(min_length=1, max_length=1000)
     relatedIds: list[int] | None = None
 
 
@@ -264,9 +256,11 @@ class DatabaseOpenResponse(BaseModel):
 class DatabaseCreateRequest(BaseModel):
     path: str = Field(min_length=1)
     email: str = Field(min_length=1)
-    masterPasswordHash: str = Field(min_length=1)
-    encryptedUserKey: str = Field(min_length=1)
-    kdfParams: KdfParams
+    password: str = Field(min_length=1)
+
+
+class DatabaseRemoveRequest(BaseModel):
+    path: str = Field(min_length=1)
 
 
 class DatabaseCreateResponse(BaseModel):

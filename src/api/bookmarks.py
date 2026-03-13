@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Query, Request, Response
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from xpinyin import Pinyin
 
 _pinyin = Pinyin()
@@ -53,6 +53,8 @@ from src.api.schemas import (
     SearchHighlight,
     UrlItem,
 )
+from src.api.session import SessionManager
+from src.crypto.encryption import EncryptionService
 from src.db.models import Bookmark, Relation, Tag
 
 router = APIRouter(prefix="/api/bookmarks", tags=["bookmarks"])
@@ -75,7 +77,8 @@ def _negate_timestamp(ts: str) -> str:
 
 def _search_rank(bm: Bookmark, search: str) -> int:
     """Return match priority: 0=exact, 1=prefix, 2=contains. Lower is better."""
-    s = search.lower()
+    keywords = [kw for kw in search.lower().split() if kw]
+    s = keywords[0] if keywords else search.lower()
     name_lower = bm.name.lower()
     if name_lower == s:
         return 0
@@ -105,7 +108,11 @@ def _compute_highlights(name: str, search: str) -> list[SearchHighlight]:
     return highlights
 
 
-def _bookmark_to_response(bm: Bookmark, search: str | None = None) -> BookmarkResponse:
+def _bookmark_to_response(
+    bm: Bookmark,
+    enc: EncryptionService | None = None,
+    search: str | None = None,
+) -> BookmarkResponse:
     tag_ids = [
         item for item in _safe_json_load_list(bm.tag_ids) if isinstance(item, int)
     ]
@@ -149,6 +156,11 @@ def _bookmark_to_response(bm: Bookmark, search: str | None = None) -> BookmarkRe
             continue
         if not isinstance(last_used, str):
             continue
+        if enc is not None:
+            try:
+                password = enc.decrypt(password)
+            except Exception:
+                password = ""
         accounts.append(
             AccountResponse(
                 id=account_id,
@@ -200,20 +212,35 @@ async def _validate_related_ids(session, accounts: list[AccountCreate]) -> bool:
     return all(related_id in existing_ids for related_id in related_ids)
 
 
-def _build_accounts(accounts: list[AccountCreate], now: str) -> list[dict[str, object]]:
+def _build_accounts(
+    accounts: list[AccountCreate],
+    now: str,
+    enc: EncryptionService | None = None,
+) -> list[dict[str, object]]:
     built: list[dict[str, object]] = []
     for index, account in enumerate(accounts, start=1):
+        password = (
+            enc.encrypt(account.password) if enc is not None else account.password
+        )
         built.append(
             {
                 "id": index,
                 "username": account.username,
-                "password": account.password,
+                "password": password,
                 "relatedIds": account.relatedIds or [],
                 "createdAt": now,
                 "lastUsed": now,
             }
         )
     return built
+
+
+def _get_enc(request: Request) -> EncryptionService | None:
+    session_manager: SessionManager = request.app.state.session_manager
+    key = session_manager.encryption_key
+    if key is None:
+        return None
+    return EncryptionService(key)
 
 
 @router.get("", response_model=None)
@@ -227,6 +254,7 @@ async def list_bookmarks(
     search: str | None = Query(default=None),
 ) -> BookmarkListResponse | Response:
     session_factory = request.app.state.session_factory
+    enc = _get_enc(request)
 
     sort_desc = sort.startswith("-")
     sort_key = sort[1:] if sort_desc else sort
@@ -256,13 +284,18 @@ async def list_bookmarks(
         base_filter = []
         search_lower = search.lower() if search else None
         if search_lower:
-            base_filter.append(
-                or_(
-                    Bookmark.name.contains(search),
-                    Bookmark.pinyin_initials.contains(search_lower),
-                    Bookmark.pinyin_full.contains(search_lower),
+            keywords = [kw for kw in search_lower.split() if kw]
+            for kw in keywords:
+                base_filter.append(
+                    or_(
+                        Bookmark.name.contains(kw),
+                        Bookmark.pinyin_initials.contains(kw),
+                        Bookmark.pinyin_full.contains(kw),
+                        Bookmark.urls.contains(kw),
+                        Bookmark.notes.contains(kw),
+                        Bookmark.accounts.contains(kw),
+                    )
                 )
-            )
 
         if filter_tag_ids:
             tag_conditions = []
@@ -298,7 +331,7 @@ async def list_bookmarks(
             result = await session.execute(data_query)
             bookmarks = list(result.scalars().all())
 
-    data = [_bookmark_to_response(bookmark, search) for bookmark in bookmarks]
+    data = [_bookmark_to_response(bookmark, enc, search) for bookmark in bookmarks]
 
     response.headers["X-Total-Count"] = str(total)
     if offset + limit < total:
@@ -324,6 +357,7 @@ async def get_bookmark(
     bookmark_id: str, request: Request
 ) -> BookmarkResponse | Response:
     session_factory = request.app.state.session_factory
+    enc = _get_enc(request)
 
     async with session_factory() as session:
         result = await session.execute(
@@ -338,7 +372,7 @@ async def get_bookmark(
             media_type="application/json",
         )
 
-    return _bookmark_to_response(bookmark)
+    return _bookmark_to_response(bookmark, enc)
 
 
 @router.post("", status_code=201, response_model=None)
@@ -348,11 +382,13 @@ async def create_bookmark(
     response: Response,
 ) -> BookmarkResponse | Response:
     session_factory = request.app.state.session_factory
+    enc = _get_enc(request)
 
     now = datetime.now(timezone.utc).isoformat()
     pinyin_initials = body.pinyinInitials
     if pinyin_initials is None:
-        pinyin_initials = _compute_initials(body.name)
+        notes_str = body.notes or ""
+        pinyin_initials = _compute_initials(body.name) + _compute_initials(notes_str)
 
     tag_ids = body.tagIds or []
     urls = [item.model_dump() for item in (body.urls or [])]
@@ -383,7 +419,7 @@ async def create_bookmark(
             tag_ids=json.dumps(tag_ids),
             urls=json.dumps(urls),
             notes=body.notes or "",
-            accounts=json.dumps(_build_accounts(accounts, now)),
+            accounts=json.dumps(_build_accounts(accounts, now, enc)),
             created_at=now,
             updated_at=now,
             last_used_at=now,
@@ -394,7 +430,7 @@ async def create_bookmark(
         await session.refresh(bookmark)
 
     response.headers["Location"] = f"/api/bookmarks/{bookmark.id}"
-    return _bookmark_to_response(bookmark)
+    return _bookmark_to_response(bookmark, enc)
 
 
 @router.put("/{bookmark_id}", response_model=None)
@@ -404,11 +440,13 @@ async def update_bookmark(
     request: Request,
 ) -> BookmarkResponse | Response:
     session_factory = request.app.state.session_factory
+    enc = _get_enc(request)
 
     now = datetime.now(timezone.utc).isoformat()
     pinyin_initials = body.pinyinInitials
     if pinyin_initials is None:
-        pinyin_initials = _compute_initials(body.name)
+        notes_str = body.notes or ""
+        pinyin_initials = _compute_initials(body.name) + _compute_initials(notes_str)
 
     tag_ids = body.tagIds or []
     urls = [item.model_dump() for item in (body.urls or [])]
@@ -443,16 +481,16 @@ async def update_bookmark(
         bookmark.name = body.name
         bookmark.pinyin_initials = pinyin_initials
         bookmark.pinyin_full = _pinyin.get_pinyin(body.name, "").lower()
+        bookmark.notes = body.notes or ""
         bookmark.tag_ids = json.dumps(tag_ids)
         bookmark.urls = json.dumps(urls)
-        bookmark.notes = body.notes or ""
-        bookmark.accounts = json.dumps(_build_accounts(accounts, now))
+        bookmark.accounts = json.dumps(_build_accounts(accounts, now, enc))
         bookmark.updated_at = now
 
         await session.commit()
         await session.refresh(bookmark)
 
-    return _bookmark_to_response(bookmark)
+    return _bookmark_to_response(bookmark, enc)
 
 
 @router.patch("/{bookmark_id}", response_model=None)
@@ -462,6 +500,7 @@ async def patch_bookmark(
     request: Request,
 ) -> BookmarkResponse | Response:
     session_factory = request.app.state.session_factory
+    enc = _get_enc(request)
 
     async with session_factory() as session:
         result = await session.execute(
@@ -481,10 +520,15 @@ async def patch_bookmark(
             bookmark.name = updates["name"]
             bookmark.pinyin_full = _pinyin.get_pinyin(bookmark.name, "").lower()
 
+        if updates.get("notes") is not None:
+            bookmark.notes = updates["notes"]
+
         if updates.get("pinyinInitials") is not None:
             bookmark.pinyin_initials = updates["pinyinInitials"]
-        elif updates.get("name") is not None:
-            bookmark.pinyin_initials = _compute_initials(bookmark.name)
+        elif updates.get("name") is not None or updates.get("notes") is not None:
+            bookmark.pinyin_initials = _compute_initials(
+                bookmark.name
+            ) + _compute_initials(bookmark.notes)
 
         if updates.get("tagIds") is not None:
             tag_ids = updates["tagIds"]
@@ -499,9 +543,6 @@ async def patch_bookmark(
         if updates.get("urls") is not None:
             bookmark.urls = json.dumps(updates["urls"])
 
-        if updates.get("notes") is not None:
-            bookmark.notes = updates["notes"]
-
         if updates.get("accounts") is not None:
             accounts = updates["accounts"]
             account_models = [AccountCreate.model_validate(item) for item in accounts]
@@ -512,14 +553,14 @@ async def patch_bookmark(
                     media_type="application/json",
                 )
             now = datetime.now(timezone.utc).isoformat()
-            bookmark.accounts = json.dumps(_build_accounts(account_models, now))
+            bookmark.accounts = json.dumps(_build_accounts(account_models, now, enc))
 
         bookmark.updated_at = datetime.now(timezone.utc).isoformat()
 
         await session.commit()
         await session.refresh(bookmark)
 
-    return _bookmark_to_response(bookmark)
+    return _bookmark_to_response(bookmark, enc)
 
 
 @router.delete("/{bookmark_id}", status_code=204, response_model=None)

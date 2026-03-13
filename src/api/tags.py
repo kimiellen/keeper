@@ -10,6 +10,27 @@ from src.db.models import Bookmark, Tag
 
 router = APIRouter(prefix="/api/tags", tags=["tags"])
 
+# 10 种亮色系标签颜色，按创建顺序循环分配
+TAG_COLORS: list[str] = [
+    "#3B82F6",  # 蓝
+    "#10B981",  # 翠绿
+    "#F59E0B",  # 琥珀
+    "#EF4444",  # 红
+    "#8B5CF6",  # 紫
+    "#EC4899",  # 粉
+    "#06B6D4",  # 青
+    "#F97316",  # 橙
+    "#14B8A6",  # 蓝绿
+    "#6366F1",  # 靛蓝
+]
+
+
+async def _next_tag_color(session) -> str:
+    """根据当前标签总数，返回下一个循环颜色。"""
+    result = await session.execute(select(func.count()).select_from(Tag))
+    count: int = result.scalar_one()
+    return TAG_COLORS[count % len(TAG_COLORS)]
+
 
 def _tag_to_response(tag: Tag) -> TagResponse:
     return TagResponse(
@@ -72,13 +93,13 @@ async def create_tag(body: TagCreate, request: Request) -> TagResponse | Respons
     session_factory = request.app.state.session_factory
 
     now = datetime.now(timezone.utc).isoformat()
-    tag = Tag(name=body.name, created_at=now, updated_at=now)
-    if body.color is not None:
-        tag.color = body.color
-    if body.icon is not None:
-        tag.icon = body.icon
 
     async with session_factory() as session:
+        color = body.color if body.color is not None else await _next_tag_color(session)
+        tag = Tag(name=body.name, color=color, created_at=now, updated_at=now)
+        if body.icon is not None:
+            tag.icon = body.icon
+
         session.add(tag)
         try:
             await session.commit()

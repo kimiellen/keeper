@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Request, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from xpinyin import Pinyin
 
 from src.api.bookmarks import _compute_initials
@@ -19,6 +19,8 @@ from src.api.schemas import (
     ImportResponse,
     ImportSkipped,
 )
+from src.api.tags import TAG_COLORS
+from src.api.session import SessionManager
 from src.crypto.encryption import EncryptionService
 from src.db.models import Bookmark, Relation, Tag
 
@@ -29,25 +31,12 @@ _pinyin = Pinyin()
 _CSV_COLUMNS = ["name", "url", "username", "password", "notes", "tags"]
 
 
-def _get_encryption_service(request: Request) -> EncryptionService | None:
-    user_key_hex = request.headers.get("X-User-Key")
-    if not user_key_hex:
+def _get_enc(request: Request) -> EncryptionService | None:
+    session_manager: SessionManager = request.app.state.session_manager
+    key = session_manager.encryption_key
+    if key is None:
         return None
-    try:
-        user_key = bytes.fromhex(user_key_hex)
-        if len(user_key) != 32:
-            return None
-        return EncryptionService(user_key)
-    except (ValueError, Exception):
-        return None
-
-
-def _missing_key_response() -> Response:
-    return Response(
-        content='{"type":"https://keeper.local/errors/missing-user-key","title":"缺少用户密钥","status":400,"detail":"请在 X-User-Key 请求头中提供有效的用户密钥"}',
-        status_code=400,
-        media_type="application/json",
-    )
+    return EncryptionService(key)
 
 
 def _decrypt_password(enc_service: EncryptionService, password: str) -> str:
@@ -160,17 +149,22 @@ async def _ensure_tags_by_name(session, tag_names: list[str]) -> dict[str, int]:
     result = await session.execute(select(Tag))
     existing_tags = {tag.name: tag.id for tag in result.scalars().all()}
 
+    count_r = await session.execute(select(func.count()).select_from(Tag))
+    current_count: int = count_r.scalar_one()
+
     name_to_id: dict[str, int] = {}
     now = datetime.now(timezone.utc).isoformat()
     for name in tag_names:
         if name in existing_tags:
             name_to_id[name] = existing_tags[name]
         else:
-            tag = Tag(name=name, created_at=now, updated_at=now)
+            color = TAG_COLORS[current_count % len(TAG_COLORS)]
+            tag = Tag(name=name, color=color, created_at=now, updated_at=now)
             session.add(tag)
             await session.flush()
             name_to_id[name] = tag.id
             existing_tags[name] = tag.id
+            current_count += 1
     return name_to_id
 
 
@@ -207,9 +201,13 @@ async def _ensure_relations_by_name(
 
 @router.get("/export/json", response_model=None)
 async def export_json(request: Request) -> Response:
-    enc_service = _get_encryption_service(request)
+    enc_service = _get_enc(request)
     if enc_service is None:
-        return _missing_key_response()
+        return Response(
+            content='{"type":"https://keeper.local/errors/unauthorized","title":"未认证","status":401,"detail":"请先解锁"}',
+            status_code=401,
+            media_type="application/json",
+        )
 
     session_factory = request.app.state.session_factory
 
@@ -299,9 +297,13 @@ async def export_json(request: Request) -> Response:
 
 @router.get("/export/csv", response_model=None)
 async def export_csv(request: Request) -> Response:
-    enc_service = _get_encryption_service(request)
+    enc_service = _get_enc(request)
     if enc_service is None:
-        return _missing_key_response()
+        return Response(
+            content='{"type":"https://keeper.local/errors/unauthorized","title":"未认证","status":401,"detail":"请先解锁"}',
+            status_code=401,
+            media_type="application/json",
+        )
 
     session_factory = request.app.state.session_factory
 
@@ -444,9 +446,13 @@ async def import_preview(
 async def import_data(
     body: ImportRequest, request: Request
 ) -> ImportResponse | Response:
-    enc_service = _get_encryption_service(request)
+    enc_service = _get_enc(request)
     if enc_service is None:
-        return _missing_key_response()
+        return Response(
+            content='{"type":"https://keeper.local/errors/unauthorized","title":"未认证","status":401,"detail":"请先解锁"}',
+            status_code=401,
+            media_type="application/json",
+        )
 
     fmt = body.format
     content = body.content

@@ -1,19 +1,19 @@
-import hmac
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, Response
 from sqlalchemy import select
 
 from src.api.schemas import (
+    AuthInfoResponse,
     InitializeRequest,
     InitializeResponse,
-    KdfParams,
     StatusResponseLocked,
     StatusResponseUnlocked,
     UnlockRequest,
     UnlockResponse,
 )
 from src.api.session import SessionManager
+from src.crypto.kdf import derive_key, hash_password, verify_password
 from src.db.models import Authentication
 from src.middleware.auth import COOKIE_NAME
 
@@ -61,13 +61,7 @@ async def initialize(
         auth_record = Authentication(
             id=1,
             email=body.email,
-            master_password_hash=body.masterPasswordHash,
-            encrypted_user_key=body.encryptedUserKey,
-            recovery_code_hash="",
-            kdf_algorithm=body.kdfParams.algorithm,
-            kdf_iterations=body.kdfParams.iterations,
-            kdf_memory=body.kdfParams.memory,
-            kdf_parallelism=body.kdfParams.parallelism,
+            password_hash=hash_password(body.password),
             created_at=now,
             last_login=now,
         )
@@ -75,6 +69,26 @@ async def initialize(
         await session.commit()
 
     return InitializeResponse()
+
+
+@router.get("/info", response_model=AuthInfoResponse)
+async def info(request: Request) -> AuthInfoResponse | Response:
+    session_factory = request.app.state.session_factory
+
+    async with session_factory() as session:
+        result = await session.execute(
+            select(Authentication).where(Authentication.id == 1)
+        )
+        auth = result.scalar_one_or_none()
+
+    if auth is None:
+        return Response(
+            content='{"type":"https://keeper.local/errors/not-initialized","title":"未初始化","status":400,"detail":"请先调用 /api/auth/initialize"}',
+            status_code=400,
+            media_type="application/json",
+        )
+
+    return AuthInfoResponse(email=auth.email)
 
 
 @router.post("/unlock", response_model=UnlockResponse)
@@ -97,10 +111,9 @@ async def unlock(
                 media_type="application/json",
             )
 
-        # Security: constant-time comparison to prevent timing attacks
-        if not hmac.compare_digest(auth.master_password_hash, body.masterPasswordHash):
+        if not verify_password(body.password, auth.password_hash):
             return Response(
-                content='{"type":"https://keeper.local/errors/invalid-master-password","title":"主密码错误","status":403,"detail":"提供的主密码哈希与存储的不匹配"}',
+                content='{"type":"https://keeper.local/errors/invalid-master-password","title":"主密码错误","status":403,"detail":"主密码不正确"}',
                 status_code=403,
                 media_type="application/json",
             )
@@ -109,23 +122,15 @@ async def unlock(
         auth.last_login = now
         await session.commit()
 
-    active_session = session_manager.create()
+    encryption_key = derive_key(body.password)
+    active_session = session_manager.create(encryption_key)
     _set_session_cookie(
         response,
         active_session.token,
         int(active_session.expires_at - active_session.created_at),
     )
 
-    return UnlockResponse(
-        encryptedUserKey=auth.encrypted_user_key,
-        kdfParams=KdfParams(
-            algorithm=auth.kdf_algorithm,
-            memory=auth.kdf_memory,
-            iterations=auth.kdf_iterations,
-            parallelism=auth.kdf_parallelism,
-            salt=auth.email,
-        ),
-    )
+    return UnlockResponse()
 
 
 @router.post("/lock", status_code=204)
