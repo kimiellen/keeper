@@ -13,7 +13,7 @@ from src.api.stats import router as stats_router
 from src.api.tags import router as tags_router
 from src.api.transfer import router as transfer_router
 from src.db.config import DatabaseConfig
-from src.db.engine import DEFAULT_DB_PATH, DatabaseManager
+from src.db.engine import DatabaseManager
 from src.middleware.auth import AuthMiddleware
 from src.middleware.rate_limit import RateLimitMiddleware
 from src.middleware.security import SecurityHeadersMiddleware
@@ -24,11 +24,10 @@ async def lifespan(app: FastAPI):
     db_config = DatabaseConfig()
     db_manager = DatabaseManager()
 
-    current = db_config.get_current() or os.environ.get(
-        "KEEPER_DB_PATH", str(DEFAULT_DB_PATH)
-    )
-    await db_manager.initialize(current)
-    db_config.set_current(current)
+    # 优先使用上次记录的数据库；没有则等待前端插件通过 /api/db/create 新建
+    current = db_config.get_current()
+    if current:
+        await db_manager.initialize(current)
 
     app.state.db_config = db_config
     app.state.db_manager = db_manager
@@ -44,7 +43,9 @@ app = FastAPI(title="Keeper API", version="1.0.0", lifespan=lifespan)
 _raw_origins = os.environ.get("KEEPER_CORS_ORIGINS", "").split(",")
 ALLOWED_ORIGINS = [o.strip() for o in _raw_origins if o.strip()]
 
-CORS_ORIGIN_REGEX = os.environ.get("KEEPER_CORS_ORIGIN_REGEX", r"^moz-extension://.*$")
+CORS_ORIGIN_REGEX = os.environ.get(
+    "KEEPER_CORS_ORIGIN_REGEX", r"^(moz-extension|chrome-extension)://.*$"
+)
 
 app.add_middleware(
     CORSMiddleware,
