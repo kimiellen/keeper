@@ -229,3 +229,7 @@ uv run pytest --cov=src
 # HTTP 开发服务器（热重载）
 uv run uvicorn src.main:app --reload
 ```
+
+## 许可证
+
+[MIT](LICENSE)
