@@ -64,3 +64,4 @@ Thumbs.db
 tsconfig.json
 main.py
 keeper加密机制.md
+scripts/backup.sh
