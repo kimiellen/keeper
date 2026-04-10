@@ -1,0 +1,58 @@
+[package]
+name = "keeper"
+version = "0.26.4"
+edition = "2021"
+
+[dependencies]
+# 轻量异步运行时
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "sync", "signal"] }
+
+# Web 框架
+axum = "0.7"
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# 数据库
+rusqlite = { version = "0.31", features = ["bundled", "chrono"] }
+# tokio-rusqlite = "0.5"  # 已切换到同步 rusqlite
+
+# 加密
+argon2 = "0.5"
+aes-gcm = "0.10"
+ring = "0.17"
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 时间
+chrono = { version = "0.4", features = ["serde"] }
+
+# 拼音
+pinyin = "0.10"
+
+# 配置管理
+dirs = "5.0"
+shellexpand = "3.0"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# 其他
+uuid = { version = "1", features = ["v4", "serde"] }
+base64 = "0.22"
+rand = "0.8"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+hex = "0.4"
+http-body-util = "0.1"
+tower = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

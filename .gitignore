@@ -65,3 +65,8 @@ tsconfig.json
 main.py
 keeper加密机制.md
 scripts/backup.sh
+
+
+# Added by cargo
+
+/target

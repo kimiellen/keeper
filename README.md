@@ -12,7 +12,7 @@ keeper-firefox  ──┐
 keeper-chrome   ──┘
 ```
 
-浏览器扩展通过 HTTPS REST API 与后端通信。后端 CORS 默认允许 `moz-extension://`（Firefox）和 `chrome-extension://`（Chrome）来源。
+浏览器扩展通过 HTTP REST API 与后端通信。后端 CORS 默认允许 `moz-extension://`（Firefox）和 `chrome-extension://`（Chrome）来源。
 
 ## 技术栈
 
@@ -39,7 +39,7 @@ keeper-chrome   ──┘
 
 所有平台都需要安装 **Python 3.12+** 和 **uv** 包管理器。
 
-浏览器扩展要求后端使用 **HTTPS**，需提前生成本地证书（推荐使用 [mkcert](https://github.com/FiloSottile/mkcert)）。
+浏览器扩展通过 HTTP 与后端在本地通信，无需证书。
 
 ---
 
@@ -62,30 +62,12 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 source $HOME/.local/bin/env
 ```
 
-**安装 mkcert 并生成证书**
-
-```bash
-# Ubuntu / Debian
-sudo apt install mkcert
-# Arch
-sudo pacman -S mkcert
-
-mkcert -install
-mkdir -p certs
-mkcert -key-file certs/localhost-key.pem -cert-file certs/localhost.pem localhost 127.0.0.1
-```
-
-**安装并启动**
+**构建并启动**
 
 ```bash
 git clone https://github.com/kimiellen/keeper.git
 cd keeper
-uv sync
-
-# HTTPS 模式（推荐）
-uv run uvicorn src.main:app --host 127.0.0.1 --port 8443 \
-  --ssl-keyfile certs/localhost-key.pem \
-  --ssl-certfile certs/localhost.pem
+cargo run -- --port 51000
 ```
 
 ---
@@ -105,26 +87,12 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 source $HOME/.local/bin/env
 ```
 
-**安装 mkcert 并生成证书**
-
-```bash
-brew install mkcert
-mkcert -install
-mkdir -p certs
-mkcert -key-file certs/localhost-key.pem -cert-file certs/localhost.pem localhost 127.0.0.1
-```
-
-**安装并启动**
+**构建并启动**
 
 ```bash
 git clone https://github.com/kimiellen/keeper.git
 cd keeper
-uv sync
-
-# HTTPS 模式（推荐）
-uv run uvicorn src.main:app --host 127.0.0.1 --port 8443 \
-  --ssl-keyfile certs/localhost-key.pem \
-  --ssl-certfile certs/localhost.pem
+cargo run -- --port 51000
 ```
 
 ---
@@ -141,30 +109,12 @@ uv run uvicorn src.main:app --host 127.0.0.1 --port 8443 \
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-**安装 mkcert 并生成证书**
-
-```powershell
-# 使用 Scoop
-scoop install mkcert
-# 或使用 Chocolatey
-choco install mkcert
-
-mkcert -install
-New-Item -ItemType Directory -Force -Path certs
-mkcert -key-file certs\localhost-key.pem -cert-file certs\localhost.pem localhost 127.0.0.1
-```
-
-**安装并启动**
+**构建并启动**
 
 ```powershell
 git clone https://github.com/kimiellen/keeper.git
 cd keeper
-uv sync
-
-# HTTPS 模式（推荐）
-uv run uvicorn src.main:app --host 127.0.0.1 --port 8443 `
-  --ssl-keyfile certs\localhost-key.pem `
-  --ssl-certfile certs\localhost.pem
+cargo run -- --port 51000
 ```
 
 ---
@@ -175,8 +125,7 @@ uv run uvicorn src.main:app --host 127.0.0.1 --port 8443 `
 |--------|--------|------|
 | `KEEPER_CORS_ORIGINS` | 空 | 额外允许的 CORS origin，逗号分隔 |
 | `KEEPER_CORS_ORIGIN_REGEX` | `^(moz-extension\|chrome-extension)://.*$` | CORS origin 正则匹配规则 |
-| `KEEPER_SSL_KEYFILE` | `certs/localhost+2-key.pem` | SSL 私钥路径 |
-| `KEEPER_SSL_CERTFILE` | `certs/localhost+2.pem` | SSL 证书路径 |
+
 
 ## 首次使用
 
@@ -193,8 +142,7 @@ uv run uvicorn src.main:app --host 127.0.0.1 --port 8443 `
 
 启动后在浏览器访问交互式文档：
 
-- HTTP 模式：`http://localhost:8000/docs`
-- HTTPS 模式：`https://localhost:8443/docs`
+- API 文档：`http://localhost:51000/docs`
 
 主要 API 分组：
 
