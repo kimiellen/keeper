@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("配置: {:?}", config);
 
     // 加载数据库配置
-    let db_config = DatabaseConfig::load();
+    let db_config = DatabaseConfig::load_from_config_dir(config.config_dir.as_deref());
     info!("数据库配置加载完成，当前数据库: {:?}", db_config.get_current());
     
     // 根据配置决定是否连接数据库

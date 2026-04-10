@@ -30,17 +30,39 @@ impl Default for DatabaseConfig {
 }
 
 impl DatabaseConfig {
-    /// 获取配置文件路径
-    fn config_path() -> PathBuf {
+    /// 获取默认配置文件路径
+    fn default_config_path() -> PathBuf {
         dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("keeper")
             .join("databases.json")
     }
 
-    /// 加载配置
+    /// 获取配置文件路径
+    fn config_path(&self) -> PathBuf {
+        Self::default_config_path()
+    }
+
+    /// 从指定目录获取配置文件路径
+    fn config_path_with_dir(config_dir: &Path) -> PathBuf {
+        config_dir.join("databases.json")
+    }
+
+    /// 加载配置（使用默认路径）
     pub fn load() -> Self {
-        let path = Self::config_path();
+        Self::load_from_path(Self::default_config_path())
+    }
+
+    /// 从指定配置目录加载
+    pub fn load_from_config_dir(config_dir: Option<&Path>) -> Self {
+        match config_dir {
+            Some(dir) => Self::load_from_path(Self::config_path_with_dir(dir)),
+            None => Self::load(),
+        }
+    }
+
+    /// 从指定路径加载配置
+    fn load_from_path(path: PathBuf) -> Self {
         eprintln!("[Keeper] 尝试加载配置: {}", path.display());
         if !path.exists() {
             eprintln!("[Keeper] 配置文件不存在，使用默认配置");
@@ -55,7 +77,7 @@ impl DatabaseConfig {
 
     /// 保存配置
     fn save(&self) -> Result<(), String> {
-        let path = Self::config_path();
+        let path = self.config_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {}", e))?;
         }

@@ -6,10 +6,8 @@ pub struct Config {
     pub host: String,
     /// 监听端口
     pub port: u16,
-    /// TLS 证书路径 (None 表示不使用 HTTPS)
-    pub cert_path: Option<PathBuf>,
-    /// TLS 私钥路径
-    pub key_path: Option<PathBuf>,
+    /// 配置目录路径（存放 databases.json）
+    pub config_dir: Option<PathBuf>,
 }
 
 impl Config {
@@ -28,13 +26,9 @@ impl Config {
             #[arg(short, long, default_value = "51000")]
             port: u16,
 
-            /// TLS 证书路径（不提供则使用 HTTP）
-            #[arg(long)]
-            cert: Option<PathBuf>,
-
-            /// TLS 私钥路径
-            #[arg(long)]
-            key: Option<PathBuf>,
+            /// 配置目录路径（存放 databases.json，默认使用系统数据目录）
+            #[arg(short = 'c', long)]
+            config_dir: Option<PathBuf>,
         }
 
         let args = Args::parse();
@@ -42,8 +36,7 @@ impl Config {
         Config {
             host: args.host,
             port: args.port,
-            cert_path: args.cert,
-            key_path: args.key,
+            config_dir: args.config_dir,
         }
     }
 }
