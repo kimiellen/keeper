@@ -133,44 +133,6 @@ cargo run --release -- -c "D:\Keeper\Config"
 keeper --help
 ```
 
-### 3. API 调用示例
-
-```bash
-# 创建数据库并初始化
-curl -X POST http://localhost:51000/api/db/create \
-  -H "Content-Type: application/json" \
-  -d '{"path": "~/keeper.db", "email": "user@example.com", "password": "master_password"}'
-
-# 解锁
-curl -X POST http://localhost:51000/api/auth/unlock \
-  -H "Content-Type: application/json" \
-  -d '{"password": "master_password"}'
-# 响应: {"message":"解锁成功","token":"..."}
-
-# 使用 Token 访问受保护端点
-export TOKEN="<从解锁响应获取的token>"
-
-# 创建标签
-curl -X POST http://localhost:51000/api/tags \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "社交账号", "color": "#3B82F6"}'
-
-# 创建书签
-curl -X POST http://localhost:51000/api/bookmarks \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "GitHub",
-    "urls": [{"url": "https://github.com"}],
-    "accounts": [{"username": "myuser", "password": "mypassword"}]
-  }'
-```
-
-## 认证机制
-
-## 快速开始
-
 ### 启动服务
 
 ```bash
