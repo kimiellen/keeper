@@ -38,17 +38,13 @@ pub async fn list_relations(
     Query(query): Query<ListRelationsQuery>,
 ) -> Result<Json<RelationListResponse>> {
     let sort = query.sort.clone();
-    
+
     let db = state.db.clone();
     let relations: Vec<Relation> = tokio::task::spawn_blocking(move || {
         let conn = db.lock().unwrap();
         // 解析排序参数
         let sort_desc = sort.starts_with('-');
-        let sort_key = if sort_desc {
-            &sort[1..]
-        } else {
-            &sort
-        };
+        let sort_key = if sort_desc { &sort[1..] } else { &sort };
 
         let order_by = match sort_key {
             "name" => "name",
@@ -69,7 +65,8 @@ pub async fn list_relations(
             result.push(relation.unwrap());
         }
         Ok::<Vec<Relation>, rusqlite::Error>(result)
-    }).await
+    })
+    .await
     .map_err(|e| AppError::Internal(format!("任务执行失败: {}", e)))?
     .map_err(|e| AppError::Internal(format!("数据库错误: {}", e)))?;
 
@@ -89,9 +86,12 @@ pub async fn get_relation(
     let db = state.db.clone();
     let relation = tokio::task::spawn_blocking(move || {
         let conn = db.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT * FROM relations WHERE id = ?").unwrap();
+        let mut stmt = conn
+            .prepare("SELECT * FROM relations WHERE id = ?")
+            .unwrap();
         stmt.query_row([relation_id], |row| Relation::from_row(row))
-    }).await
+    })
+    .await
     .map_err(|e| AppError::Internal(format!("任务执行失败: {}", e)))?
     .map_err(|_| AppError::NotFound("关联不存在".to_string()))?;
 
@@ -115,7 +115,7 @@ pub async fn create_relation(
         Some(t) => t,
         None => {
             return Err(AppError::BadRequest(
-                "关联类型必须是 phone, email, idcard 或 other".to_string(),
+                "关联类型必须是 phone, email, idcard, social 或 other".to_string(),
             ));
         }
     };
@@ -141,9 +141,12 @@ pub async fn create_relation(
             let db = state.db.clone();
             let relation = tokio::task::spawn_blocking(move || {
                 let conn = db.lock().unwrap();
-                let mut stmt = conn.prepare("SELECT * FROM relations WHERE name = ?").unwrap();
+                let mut stmt = conn
+                    .prepare("SELECT * FROM relations WHERE name = ?")
+                    .unwrap();
                 stmt.query_row([&req.name], |row| Relation::from_row(row))
-            }).await
+            })
+            .await
             .map_err(|e| AppError::Internal(format!("任务执行失败: {}", e)))?
             .map_err(|e| AppError::Internal(format!("查询关联失败: {}", e)))?;
 
@@ -176,13 +179,16 @@ pub async fn update_relation(
     let db = state.db.clone();
     let exists: bool = tokio::task::spawn_blocking(move || {
         let conn = db.lock().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM relations WHERE id = ?",
-            [relation_id],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM relations WHERE id = ?",
+                [relation_id],
+                |row| row.get(0),
+            )
+            .unwrap();
         Ok::<bool, rusqlite::Error>(count > 0)
-    }).await
+    })
+    .await
     .map_err(|e| AppError::Internal(format!("任务执行失败: {}", e)))?
     .map_err(|e| AppError::Internal(format!("数据库错误: {}", e)))?;
 
@@ -213,7 +219,8 @@ pub async fn update_relation(
             "UPDATE relations SET name = ?1, value = ?2, type = ?3, updated_at = ?4 WHERE id = ?5",
             params![name, value, type_str, now, relation_id],
         )
-    }).await;
+    })
+    .await;
 
     match result {
         Ok(Ok(_)) => {
@@ -221,9 +228,12 @@ pub async fn update_relation(
             let db = state.db.clone();
             let relation = tokio::task::spawn_blocking(move || {
                 let conn = db.lock().unwrap();
-                let mut stmt = conn.prepare("SELECT * FROM relations WHERE id = ?").unwrap();
+                let mut stmt = conn
+                    .prepare("SELECT * FROM relations WHERE id = ?")
+                    .unwrap();
                 stmt.query_row([relation_id], |row| Relation::from_row(row))
-            }).await
+            })
+            .await
             .map_err(|e| AppError::Internal(format!("任务执行失败: {}", e)))?
             .map_err(|_| AppError::NotFound("关联不存在".to_string()))?;
 
@@ -252,13 +262,16 @@ pub async fn delete_relation(
     let db = state.db.clone();
     let relation_exists: bool = tokio::task::spawn_blocking(move || {
         let conn = db.lock().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM relations WHERE id = ?",
-            [relation_id],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM relations WHERE id = ?",
+                [relation_id],
+                |row| row.get(0),
+            )
+            .unwrap();
         Ok::<bool, rusqlite::Error>(count > 0)
-    }).await
+    })
+    .await
     .map_err(|e| AppError::Internal(format!("任务执行失败: {}", e)))?
     .map_err(|e| AppError::Internal(format!("数据库错误: {}", e)))?;
 
@@ -273,18 +286,25 @@ pub async fn delete_relation(
             let conn = db.lock().unwrap();
             let mut count = 0i64;
             let mut stmt = conn.prepare("SELECT accounts FROM bookmarks").unwrap();
-            let rows = stmt.query_map([], |row| {
-                let accounts_json: String = row.get(0)?;
-                Ok(accounts_json)
-            }).unwrap();
+            let rows = stmt
+                .query_map([], |row| {
+                    let accounts_json: String = row.get(0)?;
+                    Ok(accounts_json)
+                })
+                .unwrap();
 
             for accounts_json in rows {
                 let accounts_json = accounts_json.unwrap();
-                let accounts: Vec<serde_json::Value> = serde_json::from_str(&accounts_json).unwrap_or_default();
-                
+                let accounts: Vec<serde_json::Value> =
+                    serde_json::from_str(&accounts_json).unwrap_or_default();
+
                 for account in accounts {
-                    if let Some(related_ids) = account.get("relatedIds").and_then(|v| v.as_array()) {
-                        if related_ids.iter().any(|id| id.as_i64() == Some(relation_id)) {
+                    if let Some(related_ids) = account.get("relatedIds").and_then(|v| v.as_array())
+                    {
+                        if related_ids
+                            .iter()
+                            .any(|id| id.as_i64() == Some(relation_id))
+                        {
                             count += 1;
                             break;
                         }
@@ -292,7 +312,8 @@ pub async fn delete_relation(
                 }
             }
             Ok::<i64, rusqlite::Error>(count)
-        }).await
+        })
+        .await
         .map_err(|e| AppError::Internal(format!("任务执行失败: {}", e)))?
         .map_err(|e| AppError::Internal(format!("检查引用失败: {}", e)))?;
 
@@ -308,17 +329,19 @@ pub async fn delete_relation(
         tokio::task::spawn_blocking(move || {
             let conn = db.lock().unwrap();
             let mut stmt = conn.prepare("SELECT id, accounts FROM bookmarks").unwrap();
-            let rows = stmt.query_map([], |row| {
-                let id: String = row.get(0)?;
-                let accounts_json: String = row.get(1)?;
-                Ok((id, accounts_json))
-            }).unwrap();
+            let rows = stmt
+                .query_map([], |row| {
+                    let id: String = row.get(0)?;
+                    let accounts_json: String = row.get(1)?;
+                    Ok((id, accounts_json))
+                })
+                .unwrap();
 
             for row in rows {
                 let (id, accounts_json) = row.unwrap();
-                let mut accounts: Vec<serde_json::Map<String, serde_json::Value>> = 
+                let mut accounts: Vec<serde_json::Map<String, serde_json::Value>> =
                     serde_json::from_str(&accounts_json).unwrap_or_default();
-                
+
                 let mut changed = false;
                 for account in &mut accounts {
                     if let Some(related_ids_val) = account.get_mut("relatedIds") {
@@ -331,17 +354,19 @@ pub async fn delete_relation(
                         }
                     }
                 }
-                
+
                 if changed {
                     let new_accounts = serde_json::to_string(&accounts).unwrap();
                     conn.execute(
                         "UPDATE bookmarks SET accounts = ? WHERE id = ?",
                         [&new_accounts, &id],
-                    ).unwrap();
+                    )
+                    .unwrap();
                 }
             }
             Ok::<(), rusqlite::Error>(())
-        }).await
+        })
+        .await
         .map_err(|e| AppError::Internal(format!("任务执行失败: {}", e)))?
         .map_err(|e| AppError::Internal(format!("级联删除失败: {}", e)))?;
     }
@@ -351,7 +376,8 @@ pub async fn delete_relation(
     tokio::task::spawn_blocking(move || {
         let conn = db.lock().unwrap();
         conn.execute("DELETE FROM relations WHERE id = ?", [relation_id])
-    }).await
+    })
+    .await
     .map_err(|e| AppError::Internal(format!("任务执行失败: {}", e)))?
     .map_err(|e| AppError::Internal(format!("删除关联失败: {}", e)))?;
 

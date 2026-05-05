@@ -22,11 +22,16 @@ use keeper::{
 async fn create_test_app() -> Router {
     let conn = connect_in_memory().unwrap();
     let session_manager = Arc::new(SessionManager::new(Duration::from_secs(3600)));
-    let state = AppState::new(conn, session_manager);
+    let state = AppState::new(conn, session_manager, None);
 
     Router::new()
         .route("/api/tags", axum::routing::get(list_tags).post(create_tag))
-        .route("/api/tags/:id", axum::routing::get(get_tag).put(update_tag).delete(delete_tag))
+        .route(
+            "/api/tags/:id",
+            axum::routing::get(get_tag)
+                .put(update_tag)
+                .delete(delete_tag),
+        )
         .with_state(state)
 }
 
@@ -38,9 +43,7 @@ async fn test_create_tag_success() {
         .method(Method::POST)
         .uri("/api/tags")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(
-            json!({"name": "工作"}).to_string(),
-        ))
+        .body(Body::from(json!({"name": "工作"}).to_string()))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
@@ -143,9 +146,13 @@ async fn test_update_tag() {
         ))
         .unwrap();
     let response = app.clone().oneshot(request).await.unwrap();
-    
+
     // 检查响应状态
-    assert_eq!(response.status(), StatusCode::OK, "Update should return 200");
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "Update should return 200"
+    );
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body: Value = serde_json::from_slice(&body).unwrap();

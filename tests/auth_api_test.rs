@@ -9,14 +9,14 @@ use axum::{
     Router,
 };
 use http_body_util::BodyExt;
+use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use rusqlite::Connection;
 use tower::util::ServiceExt;
 
 use keeper::{
     db::connection::connect_in_memory,
-    handlers::auth::{initialize, info, lock, status, unlock},
+    handlers::auth::{info, initialize, lock, status, unlock},
     session::manager::SessionManager,
     state::AppState,
 };
@@ -24,7 +24,7 @@ use keeper::{
 async fn setup_test_app() -> (Router, Connection, Arc<SessionManager>) {
     let conn = connect_in_memory().unwrap();
     let session_manager = Arc::new(SessionManager::new(Duration::from_secs(3600)));
-    let state = AppState::new(conn, session_manager.clone());
+    let state = AppState::new(conn, session_manager.clone(), None);
 
     let app = Router::new()
         .route("/api/auth/initialize", post(initialize))

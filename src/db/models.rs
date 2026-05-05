@@ -37,7 +37,7 @@ pub enum RelationType {
     Phone,
     Email,
     Idcard,
-    // Social,  // 当前数据库不支持
+    Social,
     Other,
 }
 
@@ -47,7 +47,7 @@ impl RelationType {
             RelationType::Phone => "phone",
             RelationType::Email => "email",
             RelationType::Idcard => "idcard",
-            // RelationType::Social => "social",
+            RelationType::Social => "social",
             RelationType::Other => "other",
         }
     }
@@ -57,7 +57,7 @@ impl RelationType {
             "phone" => Some(RelationType::Phone),
             "email" => Some(RelationType::Email),
             "idcard" => Some(RelationType::Idcard),
-            // "social" => Some(RelationType::Social),
+            "social" => Some(RelationType::Social),
             "other" => Some(RelationType::Other),
             _ => None,
         }
@@ -201,8 +201,7 @@ impl Relation {
             id: row.get("id")?,
             name: row.get("name")?,
             value: row.get("value")?,
-            r#type: RelationType::from_str(&type_str)
-                .unwrap_or(RelationType::Other),
+            r#type: RelationType::from_str(&type_str).unwrap_or(RelationType::Other),
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })

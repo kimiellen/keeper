@@ -2,6 +2,7 @@
 //!
 //! 包含所有需要在处理器之间共享的状态。
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
@@ -15,14 +16,21 @@ pub struct AppState {
     pub db: Arc<Mutex<Connection>>,
     /// 会话管理器
     pub session_manager: Arc<SessionManager>,
+    /// 配置目录路径（存放 databases.json）
+    pub config_dir: Option<PathBuf>,
 }
 
 impl AppState {
     /// 创建新的应用状态
-    pub fn new(db: Connection, session_manager: Arc<SessionManager>) -> Self {
+    pub fn new(
+        db: Connection,
+        session_manager: Arc<SessionManager>,
+        config_dir: Option<PathBuf>,
+    ) -> Self {
         Self {
             db: Arc::new(Mutex::new(db)),
             session_manager,
+            config_dir,
         }
     }
 

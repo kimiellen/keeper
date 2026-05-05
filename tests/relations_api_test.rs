@@ -14,7 +14,9 @@ use tower::util::ServiceExt;
 
 use keeper::{
     db::connection::connect_in_memory,
-    handlers::relations::{create_relation, delete_relation, get_relation, list_relations, update_relation},
+    handlers::relations::{
+        create_relation, delete_relation, get_relation, list_relations, update_relation,
+    },
     session::manager::SessionManager,
     state::AppState,
 };
@@ -22,11 +24,19 @@ use keeper::{
 async fn create_test_app() -> Router {
     let conn = connect_in_memory().unwrap();
     let session_manager = Arc::new(SessionManager::new(Duration::from_secs(3600)));
-    let state = AppState::new(conn, session_manager);
+    let state = AppState::new(conn, session_manager, None);
 
     Router::new()
-        .route("/api/relations", axum::routing::get(list_relations).post(create_relation))
-        .route("/api/relations/:id", axum::routing::get(get_relation).put(update_relation).delete(delete_relation))
+        .route(
+            "/api/relations",
+            axum::routing::get(list_relations).post(create_relation),
+        )
+        .route(
+            "/api/relations/:id",
+            axum::routing::get(get_relation)
+                .put(update_relation)
+                .delete(delete_relation),
+        )
         .with_state(state)
 }
 
@@ -50,6 +60,27 @@ async fn test_create_relation_success() {
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["name"], "手机号");
     assert_eq!(body["type"], "phone");
+}
+
+#[tokio::test]
+async fn test_create_social_relation_success() {
+    let app = create_test_app().await;
+
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/api/relations")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({"name": "GitHub", "type": "social"}).to_string(),
+        ))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["type"], "social");
 }
 
 #[tokio::test]
@@ -105,7 +136,9 @@ async fn test_update_relation() {
         .method(Method::POST)
         .uri("/api/relations")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({"name": "原名", "type": "other"}).to_string()))
+        .body(Body::from(
+            json!({"name": "原名", "type": "other"}).to_string(),
+        ))
         .unwrap();
     let response = app.clone().oneshot(request).await.unwrap();
     let body = response.into_body().collect().await.unwrap().to_bytes();
@@ -139,7 +172,9 @@ async fn test_delete_relation() {
         .method(Method::POST)
         .uri("/api/relations")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({"name": "待删除", "type": "other"}).to_string()))
+        .body(Body::from(
+            json!({"name": "待删除", "type": "other"}).to_string(),
+        ))
         .unwrap();
     let response = app.clone().oneshot(request).await.unwrap();
     let body = response.into_body().collect().await.unwrap().to_bytes();

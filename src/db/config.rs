@@ -18,6 +18,8 @@ pub struct DatabaseInfo {
 pub struct DatabaseConfig {
     pub databases: Vec<DatabaseInfo>,
     pub current: Option<String>,
+    #[serde(skip)]
+    config_dir: Option<PathBuf>,
 }
 
 impl Default for DatabaseConfig {
@@ -25,6 +27,7 @@ impl Default for DatabaseConfig {
         Self {
             databases: Vec::new(),
             current: None,
+            config_dir: None,
         }
     }
 }
@@ -40,7 +43,10 @@ impl DatabaseConfig {
 
     /// 获取配置文件路径
     fn config_path(&self) -> PathBuf {
-        Self::default_config_path()
+        match self.config_dir.as_deref() {
+            Some(dir) => Self::config_path_with_dir(dir),
+            None => Self::default_config_path(),
+        }
     }
 
     /// 从指定目录获取配置文件路径
@@ -55,23 +61,41 @@ impl DatabaseConfig {
 
     /// 从指定配置目录加载
     pub fn load_from_config_dir(config_dir: Option<&Path>) -> Self {
-        match config_dir {
-            Some(dir) => Self::load_from_path(Self::config_path_with_dir(dir)),
-            None => Self::load(),
-        }
+        Self::load_from_path_with_config_dir(
+            match config_dir {
+                Some(dir) => Self::config_path_with_dir(dir),
+                None => Self::default_config_path(),
+            },
+            config_dir.map(Path::to_path_buf),
+        )
     }
 
     /// 从指定路径加载配置
     fn load_from_path(path: PathBuf) -> Self {
+        Self::load_from_path_with_config_dir(path, None)
+    }
+
+    /// 从指定路径加载配置，并记录配置目录
+    fn load_from_path_with_config_dir(path: PathBuf, config_dir: Option<PathBuf>) -> Self {
         eprintln!("[Keeper] 尝试加载配置: {}", path.display());
         if !path.exists() {
             eprintln!("[Keeper] 配置文件不存在，使用默认配置");
-            return Self::default();
+            let mut config = Self::default();
+            config.config_dir = config_dir;
+            return config;
         }
 
         match std::fs::read_to_string(&path) {
-            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-            Err(_) => Self::default(),
+            Ok(content) => {
+                let mut config = serde_json::from_str::<Self>(&content).unwrap_or_default();
+                config.config_dir = config_dir;
+                config
+            }
+            Err(_) => {
+                let mut config = Self::default();
+                config.config_dir = config_dir;
+                config
+            }
         }
     }
 
@@ -82,8 +106,8 @@ impl DatabaseConfig {
             std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {}", e))?;
         }
 
-        let content = serde_json::to_string_pretty(self)
-            .map_err(|e| format!("序列化配置失败: {}", e))?;
+        let content =
+            serde_json::to_string_pretty(self).map_err(|e| format!("序列化配置失败: {}", e))?;
 
         std::fs::write(&path, content).map_err(|e| format!("写入配置失败: {}", e))
     }
@@ -101,7 +125,7 @@ impl DatabaseConfig {
     /// 添加数据库到列表
     pub fn add_database(&mut self, path: &str) -> Result<(), String> {
         let path = shellexpand::tilde(path).to_string();
-        
+
         // 检查是否已存在
         if self.databases.iter().any(|db| db.path == path) {
             return Ok(());
@@ -120,10 +144,10 @@ impl DatabaseConfig {
     /// 设置当前数据库
     pub fn set_current(&mut self, path: &str) -> Result<(), String> {
         let path = shellexpand::tilde(path).to_string();
-        
+
         // 确保在列表中
         self.add_database(&path)?;
-        
+
         self.current = Some(path);
         self.save()
     }
@@ -131,7 +155,7 @@ impl DatabaseConfig {
     /// 从列表中移除数据库
     pub fn remove_database(&mut self, path: &str) -> Result<(), String> {
         let path = shellexpand::tilde(path).to_string();
-        
+
         // 不能移除当前正在使用的数据库
         if self.current.as_ref() == Some(&path) {
             return Err("不能移除当前正在使用的数据库".to_string());
@@ -144,13 +168,13 @@ impl DatabaseConfig {
     /// 清理不存在的数据库文件
     pub fn cleanup(&mut self) -> Result<(), String> {
         self.databases.retain(|db| Path::new(&db.path).exists());
-        
+
         if let Some(ref current) = self.current {
             if !Path::new(current).exists() {
                 self.current = None;
             }
         }
-        
+
         self.save()
     }
 }
@@ -158,11 +182,30 @@ impl DatabaseConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn test_database_config_default() {
         let config = DatabaseConfig::default();
         assert!(config.databases.is_empty());
         assert!(config.current.is_none());
+    }
+
+    #[test]
+    fn test_save_uses_custom_config_dir() {
+        let temp_dir = tempdir().unwrap();
+        let config_dir = temp_dir.path();
+        let db_path = config_dir.join("vault.db");
+
+        let mut config = DatabaseConfig::load_from_config_dir(Some(config_dir));
+        assert!(config.get_databases().is_empty());
+
+        config.add_database(db_path.to_str().unwrap()).unwrap();
+
+        let config_path = config_dir.join("databases.json");
+        assert!(config_path.exists());
+
+        let content = std::fs::read_to_string(config_path).unwrap();
+        assert!(content.contains("vault.db"));
     }
 }

@@ -13,16 +13,14 @@ use std::sync::Arc;
 use tower::util::ServiceExt;
 
 use keeper::{
-    db::connection::connect_in_memory,
-    handlers::stats::get_stats,
-    session::manager::SessionManager,
-    state::AppState,
+    db::connection::connect_in_memory, handlers::stats::get_stats,
+    session::manager::SessionManager, state::AppState,
 };
 
 async fn create_test_app() -> Router {
     let conn = connect_in_memory().unwrap();
     let session_manager = Arc::new(SessionManager::new(Duration::from_secs(3600)));
-    let state = AppState::new(conn, session_manager);
+    let state = AppState::new(conn, session_manager, None);
 
     Router::new()
         .route("/api/stats", axum::routing::get(get_stats))
@@ -42,7 +40,7 @@ async fn test_get_stats_empty() {
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body: Value = serde_json::from_slice(&body).unwrap();
-    
+
     assert_eq!(body["totalBookmarks"], 0);
     assert_eq!(body["totalTags"], 0);
     assert_eq!(body["totalRelations"], 0);
@@ -64,7 +62,7 @@ async fn test_get_stats_structure() {
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let body: Value = serde_json::from_slice(&body).unwrap();
-    
+
     // 验证所有字段存在
     assert!(body.get("totalBookmarks").is_some());
     assert!(body.get("totalTags").is_some());

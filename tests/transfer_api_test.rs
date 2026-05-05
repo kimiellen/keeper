@@ -5,8 +5,7 @@ use std::time::Duration;
 use axum::{
     body::Body,
     http::{header, Method, Request, StatusCode},
-    middleware,
-    Router,
+    middleware, Router,
 };
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
@@ -29,7 +28,7 @@ use keeper::{
 async fn create_test_app() -> Router {
     let conn = connect_in_memory().unwrap();
     let session_manager = Arc::new(SessionManager::new(Duration::from_secs(3600)));
-    let state = AppState::new(conn, session_manager);
+    let state = AppState::new(conn, session_manager, None);
 
     Router::new()
         // 认证路由（公开）
@@ -41,11 +40,17 @@ async fn create_test_app() -> Router {
         // 标签路由（受保护）
         .route("/api/tags", axum::routing::get(list_tags).post(create_tag))
         // 关联路由（受保护）
-        .route("/api/relations", axum::routing::get(list_relations).post(create_relation))
+        .route(
+            "/api/relations",
+            axum::routing::get(list_relations).post(create_relation),
+        )
         // 书签路由（受保护）
-        .route("/api/bookmarks", axum::routing::get(list_bookmarks).post(create_bookmark))
+        .route(
+            "/api/bookmarks",
+            axum::routing::get(list_bookmarks).post(create_bookmark),
+        )
         // 导入导出路由（受保护）
-        .route("/api/export", axum::routing::get(export_data))
+        .route("/api/export", axum::routing::post(export_data))
         .route("/api/import", axum::routing::post(import_data))
         // 认证中间件
         .layer(middleware::from_fn_with_state(
@@ -98,9 +103,13 @@ async fn test_export_empty_database() {
 
     // 导出空数据库
     let request = Request::builder()
+        .method(Method::POST)
         .uri("/api/export")
+        .header(header::CONTENT_TYPE, "application/json")
         .header(header::AUTHORIZATION, format!("Bearer {}", token))
-        .body(Body::empty())
+        .body(Body::from(
+            json!({"password": "test_password_123"}).to_string(),
+        ))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
@@ -153,9 +162,13 @@ async fn test_export_with_data() {
 
     // 导出数据
     let request = Request::builder()
+        .method(Method::POST)
         .uri("/api/export")
+        .header(header::CONTENT_TYPE, "application/json")
         .header(header::AUTHORIZATION, format!("Bearer {}", token))
-        .body(Body::empty())
+        .body(Body::from(
+            json!({"password": "test_password_123"}).to_string(),
+        ))
         .unwrap();
 
     let response = app.clone().oneshot(request).await.unwrap();
@@ -169,8 +182,10 @@ async fn test_export_with_data() {
     let tags_len = body["tags"].as_array().unwrap().len();
     let relations_len = body["relations"].as_array().unwrap().len();
     if tags_len != 1 || relations_len != 1 {
-        panic!("导出数据数量不对: tags={}, relations={}. 响应: {}", 
-               tags_len, relations_len, body_str);
+        panic!(
+            "导出数据数量不对: tags={}, relations={}. 响应: {}",
+            tags_len, relations_len, body_str
+        );
     }
 
     // 验证标签数据
@@ -209,7 +224,11 @@ async fn test_import_data() {
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::AUTHORIZATION, format!("Bearer {}", &token))
         .body(Body::from(
-            json!({"data": import_data}).to_string(),
+            json!({
+                "password": "test_password_123",
+                "data": import_data
+            })
+            .to_string(),
         ))
         .unwrap();
 
@@ -260,9 +279,13 @@ async fn test_export_import_round_trip() {
 
     // 2. 导出数据
     let request = Request::builder()
+        .method(Method::POST)
         .uri("/api/export")
+        .header(header::CONTENT_TYPE, "application/json")
         .header(header::AUTHORIZATION, format!("Bearer {}", &token))
-        .body(Body::empty())
+        .body(Body::from(
+            json!({"password": "test_password_123"}).to_string(),
+        ))
         .unwrap();
 
     let response = app.clone().oneshot(request).await.unwrap();
@@ -298,7 +321,13 @@ async fn test_export_import_round_trip() {
         .uri("/api/import")
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::AUTHORIZATION, format!("Bearer {}", &new_token))
-        .body(Body::from(json!({"data": export_data}).to_string()))
+        .body(Body::from(
+            json!({
+                "password": "test_password_123",
+                "data": export_data
+            })
+            .to_string(),
+        ))
         .unwrap();
 
     let response = app.clone().oneshot(request).await.unwrap();
@@ -356,7 +385,13 @@ async fn test_import_duplicate_handling() {
         .uri("/api/import")
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::AUTHORIZATION, format!("Bearer {}", &token))
-        .body(Body::from(json!({"data": import_data}).to_string()))
+        .body(Body::from(
+            json!({
+                "password": "test_password_123",
+                "data": import_data
+            })
+            .to_string(),
+        ))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
@@ -368,7 +403,7 @@ async fn test_import_duplicate_handling() {
     // 应该成功，但标签数不会增加（重复被忽略）
     assert_eq!(body["success"], true);
     assert_eq!(body["imported"]["tags"], 0); // 重复被跳过
-    // 错误列表应该是空的（重复不算错误）
+                                             // 错误列表应该是空的（重复不算错误）
     assert!(body["errors"].as_array().unwrap().is_empty());
 }
 

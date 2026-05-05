@@ -13,10 +13,17 @@ use keeper::{
     config::Config,
     db::config::DatabaseConfig,
     db::connection::{connect, connect_in_memory},
-    handlers::auth::{initialize, info, lock, set_session_timeout, status, unlock},
-    handlers::bookmarks::{create_bookmark, delete_bookmark, get_bookmark, list_bookmarks, patch_bookmark, update_bookmark, use_bookmark},
-    handlers::database::{add_database, create_database, list_databases, open_database, remove_database},
-    handlers::relations::{create_relation, delete_relation, get_relation, list_relations, update_relation},
+    handlers::auth::{info, initialize, lock, set_session_timeout, status, unlock},
+    handlers::bookmarks::{
+        create_bookmark, delete_bookmark, get_bookmark, list_bookmarks, patch_bookmark,
+        update_bookmark, use_bookmark,
+    },
+    handlers::database::{
+        add_database, create_database, list_databases, open_database, remove_database,
+    },
+    handlers::relations::{
+        create_relation, delete_relation, get_relation, list_relations, update_relation,
+    },
     handlers::stats::get_stats,
     handlers::tags::{create_tag, delete_tag, get_tag, list_tags, update_tag},
     handlers::transfer::{export_data, import_data},
@@ -42,14 +49,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 加载数据库配置
     let db_config = DatabaseConfig::load_from_config_dir(config.config_dir.as_deref());
-    info!("数据库配置加载完成，当前数据库: {:?}", db_config.get_current());
-    
+    info!(
+        "数据库配置加载完成，当前数据库: {:?}",
+        db_config.get_current()
+    );
+
     // 根据配置决定是否连接数据库
     // 如果有当前数据库，连接它；否则使用内存数据库等待前端创建/选择
     let conn = if let Some(current_path) = db_config.get_current() {
         let db_path = std::path::PathBuf::from(&current_path);
         info!("使用已配置的数据库: {}", db_path.display());
-        
+
         if db_path.to_string_lossy() == ":memory:" {
             connect_in_memory()?
         } else {
@@ -66,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("会话管理器初始化完成，TTL: {:?}", SESSION_TTL);
 
     // 创建应用状态
-    let state = AppState::new(conn, session_manager);
+    let state = AppState::new(conn, session_manager, config.config_dir.clone());
 
     // 构建路由
     let app = Router::new()
@@ -87,13 +97,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/db/remove", post(remove_database))
         // 标签路由（受保护）
         .route("/api/tags", get(list_tags).post(create_tag))
-        .route("/api/tags/:id", get(get_tag).put(update_tag).delete(delete_tag))
+        .route(
+            "/api/tags/:id",
+            get(get_tag).put(update_tag).delete(delete_tag),
+        )
         // 关联路由（受保护）
         .route("/api/relations", get(list_relations).post(create_relation))
-        .route("/api/relations/:id", get(get_relation).put(update_relation).delete(delete_relation))
+        .route(
+            "/api/relations/:id",
+            get(get_relation)
+                .put(update_relation)
+                .delete(delete_relation),
+        )
         // 书签路由（受保护）
         .route("/api/bookmarks", get(list_bookmarks).post(create_bookmark))
-        .route("/api/bookmarks/:id", get(get_bookmark).put(update_bookmark).patch(patch_bookmark).delete(delete_bookmark))
+        .route(
+            "/api/bookmarks/:id",
+            get(get_bookmark)
+                .put(update_bookmark)
+                .patch(patch_bookmark)
+                .delete(delete_bookmark),
+        )
         .route("/api/bookmarks/:id/use", post(use_bookmark))
         // 统计路由（受保护）
         .route("/api/stats", get(get_stats))
@@ -149,13 +173,15 @@ fn create_cors_layer() -> CorsLayer {
             let origin_str = origin.to_str().unwrap_or("");
             // 允许 localhost（开发环境）
             if origin_str.starts_with("http://localhost")
-                || origin_str.starts_with("http://127.0.0.1") {
+                || origin_str.starts_with("http://127.0.0.1")
+            {
                 return true;
             }
             // 允许浏览器扩展
             if origin_str.starts_with("moz-extension://")
                 || origin_str.starts_with("chrome-extension://")
-                || origin_str.starts_with("safari-extension://") {
+                || origin_str.starts_with("safari-extension://")
+            {
                 return true;
             }
             false
